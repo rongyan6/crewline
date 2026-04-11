@@ -1,7 +1,10 @@
+# Keep the shared local-only exclusions aligned with .npmignore.
 /docs/architecture/
 /docs/design/
 /AGENT.md
-/node_modules/
 /.omx/
-*.tgz
 .DS_Store
+
+# Git-only local artifacts.
+/node_modules/
+*.tgz
