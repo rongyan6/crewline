@@ -1,0 +1,287 @@
+import { spawn } from 'node:child_process';
+import { createRuntimeHandle } from './runtime-handle.js';
+
+function sanitizeSessionName(value) {
+  return String(value).replace(/[^a-zA-Z0-9._:-]/g, '_');
+}
+
+function commandCandidates() {
+  const explicit = process.env.CREWLINE_ACPX_BIN?.trim();
+  if (explicit) return [{ command: explicit, prefix: [] }];
+  return [
+    { command: './node_modules/.bin/acpx', prefix: [] },
+    { command: 'acpx', prefix: [] },
+    { command: 'npx', prefix: ['-y', 'acpx@0.5.2'] }
+  ];
+}
+
+function runProcess(command, args, { cwd, timeoutMs = 120_000, rejectOnNonZero = true }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: 'pipe' });
+    const stdout = [];
+    const stderr = [];
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`acpx command timed out: ${command}`));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const out = Buffer.concat(stdout).toString('utf8');
+      const err = Buffer.concat(stderr).toString('utf8');
+      if (code !== 0 && rejectOnNonZero) {
+        reject(new Error(err || out || `acpx exited with code ${code}`));
+        return;
+      }
+      resolve({ code, stdout: out.trim(), stderr: err.trim() });
+    });
+  });
+}
+
+async function runAcpx(args, options) {
+  let lastError;
+  for (const candidate of commandCandidates()) {
+    try {
+      return await runProcess(candidate.command, [...candidate.prefix, ...args], options);
+    } catch (error) {
+      lastError = error;
+      if (error?.code !== 'ENOENT') {
+        continue;
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function runAcpxStreaming(args, { cwd, timeoutMs = 120_000, onChunk } = {}) {
+  let lastError;
+  for (const candidate of commandCandidates()) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const child = spawn(candidate.command, [...candidate.prefix, ...args], { cwd, stdio: 'pipe' });
+        const stderr = [];
+        const lines = [];
+        let buffer = '';
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`acpx command timed out: ${candidate.command}`));
+        }, timeoutMs);
+
+        const flushLine = (line) => {
+          if (!line.trim()) return;
+          lines.push(line);
+          try {
+            const message = JSON.parse(line);
+            const update = message?.params?.update;
+            if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+              onChunk?.(update.content.text);
+            }
+          } catch {
+            // ignore non-json lines
+          }
+        };
+
+        child.stdout.on('data', (chunk) => {
+          buffer += chunk.toString('utf8');
+          while (buffer.includes('\n')) {
+            const idx = buffer.indexOf('\n');
+            const line = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 1);
+            flushLine(line);
+          }
+        });
+        child.stderr.on('data', (chunk) => stderr.push(chunk));
+        child.on('error', (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          if (buffer.trim()) flushLine(buffer.trim());
+          const err = Buffer.concat(stderr).toString('utf8').trim();
+          let stopReason = null;
+          for (const line of lines) {
+            try {
+              const message = JSON.parse(line);
+              if (message?.result?.stopReason) stopReason = message.result.stopReason;
+            } catch {}
+          }
+          resolve({ code, stderr: err, lines, stopReason });
+        });
+      });
+    } catch (error) {
+      lastError = error;
+      if (error?.code !== 'ENOENT') continue;
+    }
+  }
+  throw lastError;
+}
+
+function extractFinalText(lines) {
+  let text = '';
+  for (const line of lines) {
+    try {
+      const message = JSON.parse(line);
+      const update = message?.params?.update;
+      if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+        text += update.content.text;
+      }
+    } catch {}
+  }
+  return text.trim();
+}
+
+function parseJsonRecord(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function buildPermissionArgs(approvalMode = 'default') {
+  switch (approvalMode) {
+    case 'deny-all':
+      return ['--deny-all', '--non-interactive-permissions', 'deny'];
+    case 'approve-reads':
+      return ['--approve-reads', '--non-interactive-permissions', 'fail'];
+    case 'approve-all':
+      return ['--approve-all', '--non-interactive-permissions', 'deny'];
+    case 'default':
+    default:
+      return ['--approve-all', '--non-interactive-permissions', 'deny'];
+  }
+}
+
+export class AcpxClient {
+  async ensureSession({ agentId, cwd = process.cwd(), sessionName }) {
+    const name = sanitizeSessionName(sessionName ?? agentId);
+    await runAcpx(['--cwd', cwd, agentId, 'sessions', 'ensure', '--name', name], { cwd });
+    return createRuntimeHandle({
+      runtimeSessionName: name,
+      sessionKey: `${agentId}:${name}`
+    });
+  }
+
+  async runTurn({ agentId, runtimeHandle, cwd = process.cwd(), messageText, onChunk, approvalMode = 'default' }) {
+    const result = await runAcpxStreaming(
+      [
+        '--cwd', cwd,
+        '--format', 'json',
+        '--ttl', '0',
+        ...buildPermissionArgs(approvalMode),
+        agentId,
+        '-s', runtimeHandle.runtimeSessionName,
+        messageText
+      ],
+      { cwd, onChunk }
+    );
+    const text = extractFinalText(result.lines);
+    if (result.code !== 0 && !text) {
+      throw new Error(result.stderr || `acpx exited with code ${result.code}`);
+    }
+    return {
+      text,
+      runtimeHandle,
+      exitCode: result.code,
+      stderr: result.stderr,
+      stopReason: result.stopReason
+    };
+  }
+
+  async resumeSession({ agentId, runtimeHandle, cwd = process.cwd() } = {}) {
+    if (!agentId || !runtimeHandle?.runtimeSessionName) {
+      return { ok: false, reason: 'missing' };
+    }
+    const name = sanitizeSessionName(runtimeHandle.runtimeSessionName);
+    const result = await runAcpx(
+      ['--cwd', cwd, '--format', 'json', agentId, 'sessions', 'show', name],
+      { cwd, rejectOnNonZero: false }
+    );
+    const payload = parseJsonRecord(result.stdout || result.stderr);
+    if (payload?.schema === 'acpx.session.v1' && payload.closed !== true) {
+      return {
+        ok: true,
+        runtimeHandle: createRuntimeHandle({
+          runtimeSessionName: payload.name ?? name,
+          sessionKey: `${agentId}:${payload.name ?? name}`,
+          opaqueState: {
+            acpSessionId: payload.acpSessionId ?? null,
+            pid: payload.pid ?? null
+          }
+        }),
+        metadata: {
+          createdAt: payload.createdAt ?? null,
+          lastUsedAt: payload.lastUsedAt ?? null
+        }
+      };
+    }
+    if (payload?.error?.message && /No cwd session|not found|closed/i.test(payload.error.message)) {
+      return { ok: false, reason: 'missing' };
+    }
+    if (result.code !== 0) {
+      throw new Error(payload?.error?.message || result.stderr || result.stdout || `acpx exited with code ${result.code}`);
+    }
+    return { ok: false, reason: 'missing' };
+  }
+
+  async status({ agentId, runtimeHandle, cwd = process.cwd() } = {}) {
+    if (!agentId && !runtimeHandle) {
+      return {
+        ok: true,
+        available: true,
+        backend: 'acpx'
+      };
+    }
+    if (!agentId || !runtimeHandle?.runtimeSessionName) {
+      return { ok: false, reason: 'missing' };
+    }
+    const result = await runAcpx(
+      ['--cwd', cwd, '--format', 'json', agentId, 'status', '-s', runtimeHandle.runtimeSessionName],
+      { cwd, rejectOnNonZero: false }
+    );
+    const payload = parseJsonRecord(result.stdout || result.stderr);
+    if (result.code !== 0) {
+      return {
+        ok: false,
+        reason: payload?.error?.message ?? result.stderr ?? result.stdout ?? `acpx exited with code ${result.code}`
+      };
+    }
+    return {
+      ok: true,
+      payload
+    };
+  }
+
+  async cancel({ agentId, runtimeHandle, cwd = process.cwd() } = {}) {
+    if (!agentId || !runtimeHandle?.runtimeSessionName) {
+      return { ok: false, reason: 'missing' };
+    }
+    const result = await runAcpx(
+      ['--cwd', cwd, agentId, 'cancel', '-s', runtimeHandle.runtimeSessionName],
+      { cwd, rejectOnNonZero: false }
+    );
+    if (result.code !== 0) {
+      return {
+        ok: false,
+        reason: result.stderr || result.stdout || `acpx exited with code ${result.code}`
+      };
+    }
+    return { ok: true };
+  }
+
+  async close({ agentId, runtimeHandle, cwd = process.cwd() } = {}) {
+    if (!agentId || !runtimeHandle?.runtimeSessionName) return { ok: true, skipped: true };
+    await runAcpx(['--cwd', cwd, agentId, 'sessions', 'close', runtimeHandle.runtimeSessionName], { cwd });
+    return { ok: true };
+  }
+}
+
+export { runAcpx, sanitizeSessionName, extractFinalText };

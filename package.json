@@ -1,0 +1,58 @@
+{
+  "name": "crewline",
+  "version": "0.1.0",
+  "description": "A gateway where humans and local AI agents collaborate.",
+  "type": "module",
+  "homepage": "https://github.com/rongyan6/crewline#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rongyan6/crewline.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rongyan6/crewline/issues"
+  },
+  "keywords": [
+    "ai-agent",
+    "gateway",
+    "cli",
+    "telegram",
+    "feishu",
+    "wechat"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "docs/guide",
+    "docs/README.md",
+    "docs/README.zh-CN.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test",
+    "doctor:telegram": "node bin/crewline.js doctor telegram",
+    "doctor:feishu": "node bin/crewline.js doctor feishu",
+    "doctor:wechat": "node bin/crewline.js doctor wechat",
+    "prepack": "npm run build",
+    "publish:check": "node scripts/publish-check.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "crewline": "dist/crewline.js"
+  },
+  "devDependencies": {
+    "acpx": "^0.5.2"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.60.0",
+    "qrcode-terminal": "0.12.0"
+  },
+  "overrides": {
+    "axios": "1.15.0"
+  }
+}

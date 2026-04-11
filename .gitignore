@@ -1,0 +1,7 @@
+/docs/architecture/
+/docs/design/
+/AGENT.md
+/node_modules/
+/.omx/
+*.tgz
+.DS_Store

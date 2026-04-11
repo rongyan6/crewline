@@ -1,0 +1,8 @@
+/docs/architecture/
+/docs/design/
+/AGENT.md
+/src/
+/tests/
+/.omx/
+*.map
+.DS_Store
