@@ -166,6 +166,8 @@ crewline status
 crewline health
 ```
 
+On macOS, `crewline start` uses `launchd` as the production service manager. If the launch agent is not installed yet, Crewline installs it automatically before starting.
+
 If `crewline doctor` reports missing items, fix `~/.crewline/crewline.json` and run it again.
 
 ## 6. Manage the Service
@@ -177,12 +179,16 @@ crewline stop
 crewline restart
 ```
 
-Install or remove the macOS background service when you want it managed by launchd:
+`crewline stop` and `crewline restart` also clean up leftover Crewline service processes on the local machine, so you do not keep stale runtimes around after a restart.
+
+Use these commands when you want to pre-install, refresh, or remove the macOS `launchd` agent explicitly:
 
 ```bash
 crewline install
 crewline uninstall
 ```
+
+Local development entrypoints such as `npm run dev` still use direct foreground execution. The formal `crewline` service commands are meant to keep production-style service management on a single `launchd` path.
 
 Run channel-specific checks when debugging a connection:
 
@@ -245,6 +251,8 @@ crewline doctor
 crewline start
 crewline status
 ```
+
+On macOS, the expected steady state after first start is `mode: "launchd"` in `crewline status`.
 
 ## Notes
 

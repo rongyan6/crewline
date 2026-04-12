@@ -193,7 +193,12 @@ crewline doctor
 
 # 启动服务
 crewline start
+
+# 查看当前服务状态（macOS 下预期是 launchd）
+crewline status
 ```
+
+现在在 macOS 上，`crewline start` 会自动通过 `launchd` 启动正式服务；`crewline stop` 和 `crewline restart` 也会顺带清理本机残留的 Crewline 进程，避免多个实例同时在线。
 
 ---
 

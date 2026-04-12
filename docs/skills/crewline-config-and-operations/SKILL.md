@@ -183,6 +183,11 @@ crewline health
 crewline wechat login
 ```
 
+- On macOS, the formal `crewline start|stop|restart` commands should be treated as `launchd` service management commands.
+- `crewline start` installs the `launchd` agent automatically if it is missing.
+- `crewline stop` and `crewline restart` are expected to clean up leftover Crewline service processes, not leave parallel runtimes behind.
+- Reserve direct execution such as `npm run dev` or `node src/app/main.js` for local development only.
+
 ## Editing Guidance
 
 - Prefer small, reversible config changes

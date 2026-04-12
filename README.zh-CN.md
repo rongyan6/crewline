@@ -165,6 +165,8 @@ crewline status
 crewline health
 ```
 
+在 macOS 上，`crewline start` 会把 `launchd` 作为正式服务管理方式。如果本机还没安装 launch agent，Crewline 会先自动安装再启动。
+
 如果 `crewline doctor` 提示缺失项，就去补 `~/.crewline/crewline.json` 或对应通道配置，然后重新执行。
 
 ## 6. 服务管理
@@ -176,12 +178,16 @@ crewline stop
 crewline restart
 ```
 
-如果你希望交给 macOS 的 launchd 管理：
+`crewline stop` 和 `crewline restart` 还会顺带清理本机残留的 Crewline 服务进程，避免重启后继续有旧实例占着连接。
+
+如果你想显式预装、重装或移除 macOS 的 `launchd` 服务：
 
 ```bash
 crewline install
 crewline uninstall
 ```
+
+像 `npm run dev` 这样的本地开发入口仍然是 direct 前台运行；正式的 `crewline` 服务命令则统一走 `launchd` 这一条生产路径。
 
 排查 channel 问题时，可以分别做自检：
 
@@ -250,6 +256,8 @@ crewline doctor
 crewline start
 crewline status
 ```
+
+在 macOS 上，首次启动后的正常状态应该是在 `crewline status` 里看到 `mode: "launchd"`。
 
 ## 备注
 
