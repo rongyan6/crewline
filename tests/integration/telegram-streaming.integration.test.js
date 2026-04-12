@@ -212,6 +212,38 @@ test('bootstrap skips typing request for fast turns when delayed typing is enabl
   assert.equal(telegramApi.chatActions.length, 0);
 });
 
+test('bootstrap keeps handling telegram turns when the initial typing action fails', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-typing-failure-'));
+  class FailingTypingTelegramApi extends FakeTelegramApi {
+    async sendChatAction() {
+      throw new Error('Client network socket disconnected before secure TLS connection was established');
+    }
+  }
+  const telegramApi = new FailingTypingTelegramApi();
+  const app = await bootstrap({
+    config: {
+      ...configFor(dir),
+      runtime: { ...configFor(dir).runtime, telegramTypingStartDelayMs: 0, telegramTypingIntervalMs: 50 }
+    },
+    telegramApi,
+    runtimeClient: new FakeRuntimeClient({ text: 'still delivered' })
+  });
+
+  await app.channelHost.dispatchRawEvent('telegram', {
+    update_id: 5,
+    message: {
+      message_id: 6,
+      date: Math.floor(Date.now() / 1000),
+      text: 'typing may fail',
+      chat: { id: 123 },
+      from: { id: 123, first_name: 'Json' }
+    }
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(telegramApi.sent.at(-1).text, 'still delivered');
+});
+
 test('bootstrap ignores unmentioned telegram group message when requireMention.group is true', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-telegram-group-gate-'));
   const telegramApi = new FakeTelegramApi();

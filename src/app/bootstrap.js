@@ -549,12 +549,22 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
           });
           logger.debug?.('[crewline.typing] sent typing action');
         };
+        const sendTypingActionSafely = async () => {
+          try {
+            await sendTypingAction();
+          } catch (error) {
+            logger.warn('[crewline.typing.failed]', {
+              conversationKey: routeDecision.conversationKey,
+              error: error?.message ?? String(error)
+            });
+          }
+        };
 
         if (telegramTypingStartDelayMs === 0) {
-          void sendTypingAction();
+          void sendTypingActionSafely();
         }
 
-        const heartbeat = startHeartbeat(sendTypingAction, {
+        const heartbeat = startHeartbeat(sendTypingActionSafely, {
           startDelayMs: telegramTypingStartDelayMs === 0 ? telegramTypingIntervalMs : telegramTypingStartDelayMs,
           intervalMs: telegramTypingIntervalMs
         });
