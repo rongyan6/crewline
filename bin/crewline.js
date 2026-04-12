@@ -106,6 +106,9 @@ async function main() {
         if (result.mode) console.log(`mode: ${result.mode}`);
         if (result.label) console.log(`label: ${result.label}`);
         if (result.logFile) console.log(`log: ${result.logFile}`);
+        if (result.mode === 'launchd' && result.action === 'install') {
+          console.log('note: launchd service was installed automatically for this start');
+        }
         return;
       }
       if (result.reason === 'already-running') {
@@ -134,6 +137,7 @@ async function main() {
       if (result.started?.started) {
         console.log('Crewline restarted.');
         console.log(`pid: ${result.started.pid}`);
+        if (result.started.mode) console.log(`mode: ${result.started.mode}`);
         return;
       }
       if (result.started?.reason === 'config-incomplete') {

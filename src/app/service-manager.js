@@ -34,6 +34,12 @@ function resolveServicePaths(env = process.env) {
   return resolveRuntimePaths(env);
 }
 
+function resolveActiveServiceMode({ launchd, pidRunning, serviceState } = {}) {
+  if (launchd?.running) return 'launchd';
+  if (!launchd?.installed && pidRunning) return 'direct';
+  return serviceState?.mode ?? (launchd?.installed ? 'launchd' : null);
+}
+
 export async function readPidFile(env = process.env) {
   const { pidFilePath } = resolveServicePaths(env);
   try {
@@ -56,32 +62,75 @@ export function isProcessRunning(pid) {
   }
 }
 
+function matchesCrewlineServiceCommand(command = '') {
+  const normalized = String(command);
+  const importedDistMain = /import\((['"]).*\/crewline\/dist\/main\.js\1\)/.test(normalized);
+  return normalized.includes('/crewline/dist/main.js')
+    || normalized.includes('/crewline/src/app/main.js')
+    || importedDistMain
+    || normalized.includes(appMain);
+}
+
 export async function listCrewlineMainPids() {
   return await new Promise((resolve, reject) => {
-    execFile('pgrep', ['-f', appMain], { encoding: 'utf8' }, (error, stdout) => {
-      if (error && error.code !== 1) {
+    execFile('ps', ['-ax', '-o', 'pid=,command='], { encoding: 'utf8' }, (error, stdout) => {
+      if (error) {
         reject(error);
         return;
       }
       const pids = (stdout ?? '')
-        .split(/\s+/)
-        .map((value) => Number(value.trim()))
-        .filter((value) => Number.isFinite(value) && value > 0);
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const match = line.match(/^(\d+)\s+(.*)$/);
+          if (!match) return null;
+          return {
+            pid: Number(match[1]),
+            command: match[2]
+          };
+        })
+        .filter((entry) => entry && Number.isFinite(entry.pid) && entry.pid > 0 && matchesCrewlineServiceCommand(entry.command))
+        .map((entry) => entry.pid);
       resolve(pids);
     });
   });
 }
 
-export async function cleanupStaleCrewlineProcesses({ keepPids = [] } = {}) {
+async function waitForProcessesToExit(pids, { timeoutMs = 5_000, intervalMs = 100 } = {}) {
+  const startedAt = Date.now();
+  let remaining = pids.filter((pid) => isProcessRunning(pid));
+  while (remaining.length && (Date.now() - startedAt) < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    remaining = remaining.filter((pid) => isProcessRunning(pid));
+  }
+  return remaining;
+}
+
+export async function cleanupStaleCrewlineProcesses({ keepPids = [], includeTrackedPids = false } = {}) {
   const keep = new Set(keepPids.filter(Boolean));
-  const pids = await listCrewlineMainPids();
-  const stale = pids.filter((pid) => !keep.has(pid) && pid !== process.pid);
+  const pids = new Set(await listCrewlineMainPids());
+  if (includeTrackedPids) {
+    const trackedPid = await readPidFile().catch(() => null);
+    const serviceStatePid = (await readServiceState().catch(() => null))?.pid ?? null;
+    if (trackedPid) pids.add(trackedPid);
+    if (serviceStatePid) pids.add(serviceStatePid);
+  }
+  const stale = Array.from(pids).filter((pid) => !keep.has(pid) && pid !== process.pid);
   for (const pid of stale) {
     try {
       process.kill(pid, 'SIGTERM');
     } catch {}
   }
-  return { stalePids: stale };
+  const remaining = await waitForProcessesToExit(stale);
+  for (const pid of remaining) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+  }
+  const forced = remaining.length ? remaining : [];
+  await waitForProcessesToExit(forced, { timeoutMs: 1_000, intervalMs: 50 });
+  return { stalePids: stale, forceKilledPids: forced };
 }
 
 export async function loadUserConfigAndEnv(processEnv = process.env) {
@@ -100,6 +149,40 @@ export async function ensureConfigReady(env = process.env) {
   };
 }
 
+function resolveLaunchdLogPaths(resolvedConfig, paths) {
+  const logDir = resolvedConfig.logging?.dir ?? paths.defaultLogDir;
+  return {
+    logDir,
+    stdoutPath: path.join(logDir, 'crewline-service.log'),
+    stderrPath: path.join(logDir, 'crewline-service.err.log')
+  };
+}
+
+async function installOrUpdateLaunchdService({ paths, resolvedConfig }) {
+  const { logDir, stdoutPath, stderrPath } = resolveLaunchdLogPaths(resolvedConfig, paths);
+  fs.mkdirSync(logDir, { recursive: true });
+  const environment = buildServiceEnvironment(process.env);
+  const plist = buildLaunchAgentPlist({
+    programArguments: [process.execPath, appMain],
+    workingDirectory: process.cwd(),
+    stdoutPath,
+    stderrPath,
+    environment,
+    comment: 'Crewline background gateway service'
+  });
+  const result = await installLaunchAgent({ plist });
+  const status = await readLaunchAgentStatus();
+  await cleanupStaleCrewlineProcesses({ keepPids: [status.pid] });
+  await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
+  return {
+    ...result,
+    pid: status.pid ?? null,
+    stdoutPath,
+    stderrPath,
+    environment
+  };
+}
+
 export async function startService() {
   const paths = resolveServicePaths();
   ensureRuntimeHome(paths);
@@ -113,38 +196,45 @@ export async function startService() {
   }
 
   const { resolvedConfig } = await loadUserConfigAndEnv();
-  const logDir = resolvedConfig.logging?.dir ?? paths.defaultLogDir;
   const launchdPlistPath = resolveLaunchAgentPlistPath();
   if (supportsLaunchd()) {
-    if (fs.existsSync(launchdPlistPath)) {
-      const status = await readLaunchAgentStatus();
-      if (status.running) {
-        await cleanupStaleCrewlineProcesses({ keepPids: [status.pid] });
-        return {
-          started: false,
-          reason: 'already-running',
-          mode: 'launchd',
-          label: status.label,
-          pid: status.pid ?? null
-        };
-      }
-      const { logFile } = await prepareStartupLogFile({
-        logDir,
-        retentionDays: 7
-      });
-      const result = await startLaunchAgent(launchdPlistPath);
-      const nextStatus = await readLaunchAgentStatus();
-      await cleanupStaleCrewlineProcesses({ keepPids: [nextStatus.pid] });
+    if (!fs.existsSync(launchdPlistPath)) {
+      const result = await installOrUpdateLaunchdService({ paths, resolvedConfig });
       return {
         started: true,
         mode: 'launchd',
         label: result.label,
-        action: result.action,
-        pid: nextStatus.pid ?? null,
-        logFile
+        action: 'install',
+        pid: result.pid,
+        logFile: result.stdoutPath
       };
     }
+    const status = await readLaunchAgentStatus();
+    if (status.running) {
+      await cleanupStaleCrewlineProcesses({ keepPids: [status.pid] });
+      await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
+      return {
+        started: false,
+        reason: 'already-running',
+        mode: 'launchd',
+        label: status.label,
+        pid: status.pid ?? null
+      };
+    }
+    const result = await startLaunchAgent(launchdPlistPath);
+    const nextStatus = await readLaunchAgentStatus();
+    await cleanupStaleCrewlineProcesses({ keepPids: [nextStatus.pid] });
+    await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
+    return {
+      started: true,
+      mode: 'launchd',
+      label: result.label,
+      action: result.action,
+      pid: nextStatus.pid ?? null,
+      logFile: nextStatus.command?.sourcePath ? resolveLaunchdLogPaths(resolvedConfig, paths).stdoutPath : undefined
+    };
   }
+  const logDir = resolvedConfig.logging?.dir ?? paths.defaultLogDir;
   const existingPid = await readPidFile();
   if (isProcessRunning(existingPid)) {
     return { started: false, reason: 'already-running', pid: existingPid };
@@ -172,15 +262,27 @@ export async function startService() {
 
 export async function stopService() {
   const paths = resolveServicePaths();
-  if (supportsLaunchd() && fs.existsSync(resolveLaunchAgentPlistPath())) {
-    try {
-      const result = await stopLaunchAgent();
-      await cleanupStaleCrewlineProcesses({ keepPids: [] });
-      await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
-      return { stopped: true, mode: 'launchd', label: result.label };
-    } catch (error) {
-      return { stopped: false, reason: 'launchd-stop-failed', error: error?.message ?? String(error) };
+  if (supportsLaunchd()) {
+    if (fs.existsSync(resolveLaunchAgentPlistPath())) {
+      try {
+        const result = await stopLaunchAgent();
+        const cleaned = await cleanupStaleCrewlineProcesses({ keepPids: [], includeTrackedPids: true });
+        await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
+        return { stopped: true, mode: 'launchd', label: result.label, cleaned };
+      } catch (error) {
+        return { stopped: false, reason: 'launchd-stop-failed', error: error?.message ?? String(error) };
+      }
     }
+    const cleaned = await cleanupStaleCrewlineProcesses({ keepPids: [], includeTrackedPids: true });
+    const pid = await readPidFile();
+    if ((cleaned.stalePids?.length ?? 0) > 0 || (pid && isProcessRunning(pid))) {
+      if (pid && isProcessRunning(pid)) {
+        process.kill(pid, 'SIGTERM');
+      }
+      await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
+      return { stopped: true, mode: 'direct-legacy', pid, cleaned };
+    }
+    return { stopped: false, reason: 'not-running' };
   }
   const pid = await readPidFile();
   if (!pid || !isProcessRunning(pid)) {
@@ -189,7 +291,8 @@ export async function stopService() {
   }
   process.kill(pid, 'SIGTERM');
   await fsp.rm(paths.pidFilePath, { force: true });
-  return { stopped: true, pid };
+  const cleaned = await cleanupStaleCrewlineProcesses({ keepPids: [], includeTrackedPids: true });
+  return { stopped: true, pid, cleaned };
 }
 
 export async function restartService() {
@@ -209,30 +312,10 @@ export async function installService() {
     return { installed: false, reason: 'config-incomplete', readiness };
   }
   const { resolvedConfig } = await loadUserConfigAndEnv();
-  const { logDir, stdoutPath, stderrPath } = {
-    logDir: resolvedConfig.logging?.dir ?? paths.defaultLogDir,
-    stdoutPath: path.join(resolvedConfig.logging?.dir ?? paths.defaultLogDir, 'crewline-service.log'),
-    stderrPath: path.join(resolvedConfig.logging?.dir ?? paths.defaultLogDir, 'crewline-service.err.log')
-  };
-  fs.mkdirSync(logDir, { recursive: true });
-  const environment = buildServiceEnvironment(process.env);
-  const plist = buildLaunchAgentPlist({
-    programArguments: [process.execPath, appMain],
-    workingDirectory: process.cwd(),
-    stdoutPath,
-    stderrPath,
-    environment,
-    comment: 'Crewline background gateway service'
-  });
-  const result = await installLaunchAgent({ plist });
-  const status = await readLaunchAgentStatus();
-  await cleanupStaleCrewlineProcesses({ keepPids: [status.pid] });
+  const result = await installOrUpdateLaunchdService({ paths, resolvedConfig });
   return {
     installed: true,
-    ...result,
-    stdoutPath,
-    stderrPath,
-    environment
+    ...result
   };
 }
 
@@ -254,9 +337,14 @@ export async function getServiceStatus() {
   const command = supportsLaunchd() ? await readLaunchAgentProgramArguments().catch(() => null) : null;
   const pidRunning = isProcessRunning(pid);
   const running = launchd.running || (!launchd.installed && pidRunning);
+  const mode = resolveActiveServiceMode({ launchd, pidRunning, serviceState });
   return {
     running,
     pid: launchd.pid ?? (pidRunning ? pid : null),
+    mode,
+    managedBy: launchd.installed ? 'launchd' : 'direct',
+    autoRestart: launchd.installed,
+    startsOnLogin: launchd.installed,
     command,
     paths,
     launchd,

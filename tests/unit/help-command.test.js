@@ -11,5 +11,7 @@ test('formatHelp lists init help and channel doctor commands', () => {
   assert.match(help, /doctor telegram/);
   assert.match(help, /doctor feishu/);
   assert.match(help, /doctor wechat/);
+  assert.match(help, /uses launchd and installs the agent automatically/);
+  assert.match(help, /direct mode is reserved for local development/);
   assert.match(help, /\/Users\/tester\/\.crewline/);
 });

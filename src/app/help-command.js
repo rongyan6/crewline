@@ -31,6 +31,10 @@ export function formatHelp({ defaultRuntimeHome } = {}) {
     '  crewline init',
     '  crewline help',
     '  crewline doctor',
-    '  crewline start'
+    '  crewline start',
+    '',
+    'macOS service management:',
+    '  `crewline start` uses launchd and installs the agent automatically when needed.',
+    '  direct mode is reserved for local development entrypoints such as `npm run dev`.'
   ].join('\n');
 }

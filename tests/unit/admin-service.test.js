@@ -39,7 +39,10 @@ function createDeps(overrides = {}) {
     getServiceStatus: async () => ({
       running: true,
       pid: 4321,
-      launchd: { loaded: true },
+      mode: 'launchd',
+      managedBy: 'launchd',
+      startsOnLogin: true,
+      launchd: { installed: true, loaded: true, running: true },
       serviceState: { status: 'running', runtimeHome: '/tmp/runtime' },
       command: { programArguments: ['node', 'main.js'] },
       paths: { runtimeHome: '/tmp/runtime' }
@@ -99,6 +102,8 @@ test('/admin_status summarizes service status', async () => {
   assert.equal(result.handled, true);
   assert.match(result.text, /running=true/);
   assert.match(result.text, /pid=4321/);
+  assert.match(result.text, /mode=launchd/);
+  assert.match(result.text, /managedBy=launchd/);
   assert.match(result.text, /serviceState=running/);
 });
 

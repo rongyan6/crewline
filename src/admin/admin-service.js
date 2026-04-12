@@ -191,7 +191,11 @@ function summarizeStatus(status) {
     '服务状态：',
     `running=${status.running === true}`,
     `pid=${status.pid ?? 'N/A'}`,
-    `launchd=${status.launchd?.loaded === true}`,
+    `mode=${status.mode ?? 'unknown'}`,
+    `managedBy=${status.managedBy ?? 'unknown'}`,
+    `startsOnLogin=${status.startsOnLogin === true}`,
+    `launchdInstalled=${status.launchd?.installed === true}`,
+    `launchdRunning=${status.launchd?.running === true}`,
     `serviceState=${status.serviceState?.status ?? 'unknown'}`
   ].join('\n');
 }
