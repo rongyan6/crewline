@@ -17,6 +17,7 @@ This file records local operating rules for this repository. It should stay out 
 - npm publishes from this machine use access-token auth.
 - GitHub pushes use SSH.
 - Canonical GitHub remote: `git@github.com:rongyan6/crewline.git`
+- Before modifying the project, ensure the local branch has pulled the latest code from the remote.
 
 ## Packaging Safety
 
