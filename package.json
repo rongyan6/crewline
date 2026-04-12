@@ -32,6 +32,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "dev": "node src/app/main.js",
     "test": "node --test",
     "doctor:telegram": "node bin/crewline.js doctor telegram",
     "doctor:feishu": "node bin/crewline.js doctor feishu",

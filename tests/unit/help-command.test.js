@@ -11,7 +11,5 @@ test('formatHelp lists init help and channel doctor commands', () => {
   assert.match(help, /doctor telegram/);
   assert.match(help, /doctor feishu/);
   assert.match(help, /doctor wechat/);
-  assert.match(help, /prod-start/);
-  assert.match(help, /prod-status/);
   assert.match(help, /\/Users\/tester\/\.crewline/);
 });

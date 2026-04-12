@@ -152,22 +152,17 @@ crewline health
 
 ## 6. 服务管理
 
-开发阶段默认使用 direct 进程模式，下面这些命令不会走 launchd：
+停止或重启：
 
 ```bash
-crewline start
 crewline stop
 crewline restart
-crewline status
 ```
 
-只有在生产场景下，才建议在 macOS 上交给 launchd 管理：
+如果你希望交给 macOS 的 launchd 管理：
 
 ```bash
 crewline install
-crewline prod-start
-crewline prod-status
-crewline prod-stop
 crewline uninstall
 ```
 
