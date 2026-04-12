@@ -350,6 +350,65 @@ test('bootstrap sends feishu generating card before runtime finishes', async () 
   assert.equal(createAt < runtimeFinishedAt, true);
 });
 
+test('bootstrap finalizes feishu pending reply when runtime fails after streaming starts', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-stream-failure-'));
+  const sdk = createFeishuSdkSpy();
+  const operations = [];
+  const originalCreateClient = sdk.createClient;
+  sdk.createClient = (...args) => {
+    const client = originalCreateClient(...args);
+    for (const methodName of ['create', 'patch', 'reply']) {
+      const originalMethod = client.im.message?.[methodName];
+      if (!originalMethod) continue;
+      client.im.message[methodName] = async (payload) => {
+        operations.push(methodName);
+        return originalMethod(payload);
+      };
+    }
+    return client;
+  };
+
+  const runtimeClient = new FakeRuntimeClient();
+  runtimeClient.runTurn = async ({ messageText, onChunk }) => {
+    runtimeClient.calls.push(messageText);
+    onChunk?.('半');
+    onChunk?.('截');
+    throw new Error('运行失败');
+  };
+  const config = feishuConfigFor(dir);
+  config.channel.feishu.streaming = true;
+  config.channel.feishu.footer = { status: true };
+
+  const app = await bootstrap({
+    config,
+    runtimeClient,
+    feishuSdk: sdk
+  });
+
+  await app.channelHost.dispatchRawEvent('feishu', {
+    accountId: 'appid',
+    message: {
+      message_id: 'om_stream_fail_1',
+      chat_id: 'oc_stream_fail',
+      chat_type: 'p2p',
+      message_type: 'text',
+      content: JSON.stringify({ text: 'stream then fail' }),
+      create_time: String(Date.now())
+    },
+    sender: {
+      sender_id: { open_id: 'ou_123', user_id: 'u_123', union_id: 'un_123' }
+    }
+  });
+
+  assert.equal(operations[0], 'create');
+  assert.equal(operations.at(-1), 'patch');
+  assert.equal(operations.filter((entry) => entry === 'create').length, 1);
+  assert.equal(operations.filter((entry) => entry === 'reply').length, 0);
+  assert.equal(operations.filter((entry) => entry === 'patch').length >= 2, true);
+  assert.match(readFeishuContent(sdk.sent.at(-1)), /运行失败/);
+  assert.match(readFeishuContent(sdk.sent.at(-1)), /状态：执行失败/);
+});
+
 test('bootstrap adds and removes feishu typing reaction while runtime is running', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-typing-'));
   const sdk = createFeishuSdkSpy();

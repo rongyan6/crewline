@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { handleAdminCommand } from '../../src/admin/admin-service.js';
 
 function createInboundMessage(text, overrides = {}) {
@@ -348,6 +351,61 @@ test('/admin_user adds specified feishu admin user', async () => {
   assert.match(result.text, /已将用户 ou_admin_2 加入 feishu 的 adminUserIds/);
   assert.deepEqual(savedConfig.channel.feishu.adminUserIds, ['ou_admin_1', 'ou_admin_2']);
   assert.deepEqual(savedConfig.channel.feishu.groupAllowFrom, ['ou_admin_1', 'ou_admin_2']);
+});
+
+test('/admin_user default restart launcher resolves crewline cli outside repo cwd', async () => {
+  const originalCwd = process.cwd();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-admin-cwd-'));
+  let spawned = null;
+
+  try {
+    process.chdir(tempDir);
+    const result = await handleAdminCommand({
+      inboundMessage: createInboundMessage('/admin_user userId=456'),
+      config: createConfig(),
+      deps: createDeps({
+        loadResolvedRuntimeConfig: async () => ({
+          userConfig: {
+            channel: {
+              telegram: {
+                adminUserIds: ['123']
+              }
+            },
+            agents: {
+              instances: {
+                codex_cc: { providerId: 'codex', cwd: '/tmp/codex' }
+              },
+              providers: {
+                codex: { driver: 'acpx', agent: 'codex' }
+              }
+            }
+          },
+          config: {
+            secrets: {
+              telegramAccounts: {}
+            }
+          },
+          configPath: '/tmp/crewline.json'
+        }),
+        persistUserConfig: async () => {},
+        scheduleServiceCommand: undefined,
+        spawn: (command, args, options) => {
+          spawned = { command, args, options };
+          return { unref() {} };
+        }
+      })
+    });
+
+    await result.postSendAction?.();
+
+    assert.equal(spawned.command, process.execPath);
+    assert.match(spawned.args[0], /(?:^|\/)(bin|dist)\/crewline\.js$/);
+    assert.ok(path.isAbsolute(spawned.args[0]));
+    assert.equal(spawned.options.cwd, originalCwd);
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('/admin_reg bootstraps telegram dm binding and adminUserIds when admin list is empty', async () => {

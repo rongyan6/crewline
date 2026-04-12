@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parseAdminCommand, formatAdminHelp } from './admin-command.js';
 import {
   applyAdminUser,
@@ -32,10 +33,31 @@ const defaultAdminDeps = {
   spawn
 };
 
-function resolveCliEntrypoint() {
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+function findCrewlinePackageRoot(startDir = moduleDir) {
+  let current = startDir;
+  while (true) {
+    const packageJsonPath = path.join(current, 'package.json');
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      if (packageJson?.name === 'crewline') {
+        return current;
+      }
+    } catch {
+      // Walk upward until we find Crewline's package root.
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) return process.cwd();
+    current = parent;
+  }
+}
+
+function resolveCliEntrypoint(baseDir = findCrewlinePackageRoot()) {
   const candidates = [
-    path.resolve(process.cwd(), 'bin', 'crewline.js'),
-    path.resolve(process.cwd(), 'dist', 'crewline.js')
+    path.resolve(baseDir, 'bin', 'crewline.js'),
+    path.resolve(baseDir, 'dist', 'crewline.js')
   ];
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 }
@@ -44,11 +66,12 @@ function scheduleServiceCommand(command, deps = defaultAdminDeps) {
   if (typeof deps.scheduleServiceCommand === 'function') {
     return deps.scheduleServiceCommand(command);
   }
-  const cliEntrypoint = resolveCliEntrypoint();
+  const packageRoot = findCrewlinePackageRoot();
+  const cliEntrypoint = resolveCliEntrypoint(packageRoot);
   const child = deps.spawn(process.execPath, [cliEntrypoint, command], {
     detached: true,
     stdio: 'ignore',
-    cwd: process.cwd(),
+    cwd: packageRoot,
     env: process.env
   });
   child.unref?.();

@@ -767,13 +767,31 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
         });
       } else if (!result.ok) {
         if (liveStream) liveStream.close();
-        if (liveSendPromise) {
-          await liveSendPromise.catch(() => undefined);
-        }
         const failureText = result.errorMessage ?? '当前会话执行失败。';
         let sendResult = null;
-        if (inboundMessage.channel === 'feishu') {
-          sendResult = await finalizeFeishuPendingReply(failureText);
+        if (liveSendPromise) {
+          let liveResult = null;
+          try {
+            liveResult = await liveSendPromise;
+          } catch (streamError) {
+            logger.warn('[crewline.stream.failed]', {
+              conversationKey: routeDecision.conversationKey,
+              error: streamError?.message ?? String(streamError)
+            });
+          }
+          if (inboundMessage.channel === 'feishu' && liveResult?.messageId) {
+            sendResult = await channelHost.send(createOutboundMessage({
+              channel: inboundMessage.channel,
+              accountId: inboundMessage.accountId,
+              conversationRef: inboundMessage.conversationRef,
+              text: failureText,
+              meta: {
+                patchMessageId: liveResult.messageId,
+                elapsedMs: Date.now() - streamStartedAt,
+                statusText: '执行失败'
+              }
+            }));
+          }
         }
         sendResult ??= await channelHost.send(createOutboundMessage({
           channel: inboundMessage.channel,
