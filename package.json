@@ -1,6 +1,6 @@
 {
   "name": "crewline",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A gateway where humans and local AI agents collaborate.",
   "type": "module",
   "homepage": "https://github.com/rongyan6/crewline#readme",
@@ -48,10 +48,8 @@
   "bin": {
     "crewline": "dist/crewline.js"
   },
-  "devDependencies": {
-    "acpx": "^0.5.2"
-  },
   "dependencies": {
+    "acpx": "^0.5.2",
     "@larksuiteoapi/node-sdk": "^1.60.0",
     "qrcode-terminal": "0.12.0"
   },

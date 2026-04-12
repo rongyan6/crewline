@@ -1,5 +1,40 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createRuntimeHandle } from './runtime-handle.js';
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+function findCrewlinePackageRoot(startDir = moduleDir) {
+  let current = startDir;
+  while (true) {
+    const packageJsonPath = path.join(current, 'package.json');
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      if (packageJson?.name === 'crewline') {
+        return current;
+      }
+    } catch {
+      // Keep walking upward until we find Crewline's package root.
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function resolveBundledAcpxCommand() {
+  const packageRoot = findCrewlinePackageRoot();
+  if (!packageRoot) return null;
+  return path.join(
+    packageRoot,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'acpx.cmd' : 'acpx'
+  );
+}
 
 function sanitizeSessionName(value) {
   return String(value).replace(/[^a-zA-Z0-9._:-]/g, '_');
@@ -8,8 +43,9 @@ function sanitizeSessionName(value) {
 function commandCandidates() {
   const explicit = process.env.CREWLINE_ACPX_BIN?.trim();
   if (explicit) return [{ command: explicit, prefix: [] }];
+  const bundled = resolveBundledAcpxCommand();
   return [
-    { command: './node_modules/.bin/acpx', prefix: [] },
+    ...(bundled ? [{ command: bundled, prefix: [] }] : []),
     { command: 'acpx', prefix: [] },
     { command: 'npx', prefix: ['-y', 'acpx@0.5.2'] }
   ];
@@ -284,4 +320,4 @@ export class AcpxClient {
   }
 }
 
-export { runAcpx, sanitizeSessionName, extractFinalText };
+export { runAcpx, sanitizeSessionName, extractFinalText, findCrewlinePackageRoot, resolveBundledAcpxCommand };
