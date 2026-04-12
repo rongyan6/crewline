@@ -24,6 +24,23 @@ npm install -g crewline
 
 安装完成后，就可以直接使用全局命令 `crewline`。
 
+提示：
+Crewline 已经把 Codex 和 Claude 常用的 ACPX adapter 作为直接依赖装上，但 ACPX 在首次拉起其他 agent adapter 时，内部仍然可能调用 `npx`。
+
+大多数用户不会遇到这个问题。只有在 npm 明确报出 cache 权限错误，比如 `EACCES` 或 `EPERM` 时，再先检查当前机器的 npm cache 目录：
+
+```bash
+npm config get cache
+```
+
+如果这个目录被 `root` 或其他用户占用，再执行：
+
+```bash
+sudo chown -R "$(id -un)":"$(id -gn)" "$(npm config get cache)"
+```
+
+这个问题通常出现在你之前执行过 `sudo npm ...`，或者有 root 进程改坏了 npm cache 目录权限。
+
 ## 2. 初始化配置
 
 直接生成默认配置：
