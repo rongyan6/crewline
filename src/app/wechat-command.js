@@ -27,6 +27,7 @@ export function applyWechatAutoBinding(userConfig = {}, { accountId, userId }) {
   const next = structuredClone(userConfig);
   next.channel ??= {};
   next.channel.wechat ??= {};
+  next.channel.wechat.enabled = true;
   next.channel.wechat.accounts = normalizeWechatAccountsObject(next.channel.wechat);
 
   const placeholderKeys = ['pending-wechat-user-id', '__pending_wechat_user_id__', 'wechat-user-id'];

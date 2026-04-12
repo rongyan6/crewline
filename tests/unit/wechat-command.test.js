@@ -89,6 +89,24 @@ test('applyWechatAutoBinding auto-binds first instance when dm bindings are empt
   });
 });
 
+test('applyWechatAutoBinding enables wechat channel after successful login binding', () => {
+  const updated = applyWechatAutoBinding({
+    agents: {
+      instances: {
+        codex_cc: { providerId: 'codex', cwd: '/tmp' }
+      }
+    },
+    channel: {
+      wechat: {
+        enabled: false
+      }
+    }
+  }, { accountId: 'bot@im.bot', userId: 'wxid_real' });
+
+  assert.equal(updated.channel.wechat.enabled, true);
+  assert.equal(updated.channel.wechat.accounts['bot@im.bot'].bindings.dm.wxid_real.instanceId, 'codex_cc');
+});
+
 test('persistWechatAutoBinding writes updated config to disk', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-wechat-config-'));
   const configPath = path.join(dir, 'crewline.json');
@@ -100,6 +118,7 @@ test('persistWechatAutoBinding writes updated config to disk', async () => {
     },
     channel: {
       wechat: {
+        enabled: false,
         bindings: {
           dm: {
             'pending-wechat-user-id': { instanceId: 'codex_cc' }
@@ -117,6 +136,7 @@ test('persistWechatAutoBinding writes updated config to disk', async () => {
   });
 
   const saved = JSON.parse(await fs.readFile(configPath, 'utf8'));
+  assert.equal(saved.channel.wechat.enabled, true);
   assert.equal(saved.channel.wechat.accounts['bot@im.bot'].bindings.dm.wxid_real.instanceId, 'codex_cc');
   assert.equal(saved.channel.wechat.bindings, undefined);
 });

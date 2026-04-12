@@ -112,10 +112,12 @@ export async function main() {
     'dist/doctor-feishu.js',
     'dist/doctor-wechat.js',
     'README.md',
+    'docs/images/wechat-qrcode.jpg',
     'docs/guide/README.md',
     'docs/guide/channels/telegram.md',
     'docs/guide/channels/feishu.md',
-    'docs/guide/channels/wechat.md'
+    'docs/guide/channels/wechat.md',
+    'docs/skills/crewline-config-and-operations/SKILL.md'
   ];
 
   const missing = required.filter((filePath) => !filePaths.includes(filePath));

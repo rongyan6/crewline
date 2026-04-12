@@ -1,6 +1,6 @@
 {
   "name": "crewline",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A gateway where humans and local AI agents collaborate.",
   "type": "module",
   "homepage": "https://github.com/rongyan6/crewline#readme",
@@ -26,6 +26,8 @@
     "dist",
     "README.md",
     "README.zh-CN.md",
+    "docs/images/wechat-qrcode.jpg",
+    "docs/skills",
     "docs/guide",
     "docs/README.md",
     "docs/README.zh-CN.md"

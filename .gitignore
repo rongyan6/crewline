@@ -7,3 +7,4 @@
 # Git-only local artifacts.
 /node_modules/
 *.tgz
+.omx/
