@@ -1,7 +1,6 @@
 # Keep the shared local-only exclusions aligned with .npmignore.
 /docs/architecture/
 /docs/design/
-/AGENT.md
 /.omx/
 .DS_Store
 
