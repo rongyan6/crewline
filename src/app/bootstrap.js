@@ -226,7 +226,11 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
     : null;
   const agentRegistry = new AgentRegistry(config.agents);
   const router = new ConversationRouter({ bindings: config.bindings, agentRegistry });
-  const runtimeGateway = new AcpRuntimeGateway({ client: runtimeClient ?? new AcpxClient() });
+  const runtimeGateway = new AcpRuntimeGateway({
+    client: runtimeClient ?? new AcpxClient({
+      turnTimeoutMs: config.runtime?.acpxTurnTimeoutMs
+    })
+  });
   const stateStore = new StateStore({
     dataDir: config.runtime.dataDir,
     runtimeBindingStore: new RuntimeBindingStore((conversationRef) =>
@@ -504,6 +508,8 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       : inboundMessage.channel === 'telegram' && telegramAccountConfig?.streaming === true;
     const liveStream = shouldLiveStream ? new AsyncTextStream() : null;
     let liveSendPromise = null;
+    let liveSendError = null;
+    let liveSendErrorLogged = false;
 
     const ensureLiveSend = () => {
       if (!shouldLiveStream || liveSendPromise) return;
@@ -525,7 +531,10 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
                 minCharsPerEdit: 80
               }
             })
-      }));
+      })).catch((error) => {
+        liveSendError = error;
+        return null;
+      });
     };
 
     try {
@@ -682,14 +691,13 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
         if (liveStream) liveStream.close();
         let sendResult = null;
         if (liveSendPromise) {
-          let liveResult = null;
-          try {
-            liveResult = await liveSendPromise;
-          } catch (streamError) {
+          const liveResult = await liveSendPromise;
+          if (liveSendError && !liveSendErrorLogged) {
             logger.warn('[crewline.stream.failed]', {
               conversationKey: routeDecision.conversationKey,
-              error: streamError?.message ?? String(streamError)
+              error: liveSendError?.message ?? String(liveSendError)
             });
+            liveSendErrorLogged = true;
           }
           if (inboundMessage.channel === 'feishu') {
             sendResult = await channelHost.send(createOutboundMessage({
@@ -780,14 +788,13 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
         const failureText = result.errorMessage ?? '当前会话执行失败。';
         let sendResult = null;
         if (liveSendPromise) {
-          let liveResult = null;
-          try {
-            liveResult = await liveSendPromise;
-          } catch (streamError) {
+          const liveResult = await liveSendPromise;
+          if (liveSendError && !liveSendErrorLogged) {
             logger.warn('[crewline.stream.failed]', {
               conversationKey: routeDecision.conversationKey,
-              error: streamError?.message ?? String(streamError)
+              error: liveSendError?.message ?? String(liveSendError)
             });
+            liveSendErrorLogged = true;
           }
           if (inboundMessage.channel === 'feishu' && liveResult?.messageId) {
             sendResult = await channelHost.send(createOutboundMessage({

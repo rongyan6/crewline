@@ -641,6 +641,44 @@ test('bootstrap starts telegram stream before runtime finishes', async () => {
   assert.equal(streamStartedAt < runtimeFinishedAt, true);
 });
 
+test('bootstrap falls back to final telegram send when live stream send rejects early', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-telegram-stream-fallback-'));
+  const telegramApi = new FakeTelegramApi();
+  telegramApi.streamText = async () => {
+    throw new Error('Client network socket disconnected before secure TLS connection was established');
+  };
+  const runtimeClient = new FakeRuntimeClient({
+    text: 'final fallback text',
+    chunks: ['final ', 'fallback ', 'text']
+  });
+  const app = await bootstrap({
+    config: {
+      ...configFor(dir),
+      channel: {
+        telegram: {
+          ...(configFor(dir).telegram ?? {}),
+          streaming: true
+        }
+      }
+    },
+    telegramApi,
+    runtimeClient
+  });
+
+  await app.channelHost.dispatchRawEvent('telegram', {
+    update_id: 60,
+    message: {
+      message_id: 61,
+      date: Math.floor(Date.now() / 1000),
+      text: 'stream may fail',
+      chat: { id: 123, type: 'private' },
+      from: { id: 123, first_name: 'Json' }
+    }
+  });
+
+  assert.equal(telegramApi.sent.at(-1).text, 'final fallback text');
+});
+
 test('bootstrap converts inbound photo into downloaded local-path prompt text', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-photo-'));
   let observedMessageText = null;

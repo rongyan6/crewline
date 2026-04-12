@@ -45,6 +45,7 @@ function defaultSystemConfig() {
       mode: 'polling',
       dataDir: '~/.crewline',
       timezone: 'Asia/Shanghai',
+      acpxTurnTimeoutMs: 600000,
       gracefulShutdownMs: 10000,
       hotReload: false
     },

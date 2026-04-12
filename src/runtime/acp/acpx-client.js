@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { createRuntimeHandle } from './runtime-handle.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ACPX_COMMAND_TIMEOUT_MS = 120_000;
+const DEFAULT_ACPX_TURN_TIMEOUT_MS = 600_000;
 
 function findCrewlinePackageRoot(startDir = moduleDir) {
   let current = startDir;
@@ -51,14 +53,22 @@ function commandCandidates() {
   ];
 }
 
-function runProcess(command, args, { cwd, timeoutMs = 120_000, rejectOnNonZero = true }) {
+function createAcpxTimeoutError(commandLabel, timeoutMs) {
+  const error = new Error(`acpx command timed out after ${timeoutMs}ms: ${commandLabel}`);
+  error.code = 'ETIMEDOUT';
+  error.command = commandLabel;
+  error.timeoutMs = timeoutMs;
+  return error;
+}
+
+function runProcess(command, args, { cwd, timeoutMs = DEFAULT_ACPX_COMMAND_TIMEOUT_MS, rejectOnNonZero = true }) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, stdio: 'pipe' });
     const stdout = [];
     const stderr = [];
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error(`acpx command timed out: ${command}`));
+      reject(createAcpxTimeoutError(command, timeoutMs));
     }, timeoutMs);
 
     child.stdout.on('data', (chunk) => stdout.push(chunk));
@@ -106,7 +116,7 @@ async function runAcpxStreaming(args, { cwd, timeoutMs = 120_000, onChunk } = {}
         let buffer = '';
         const timer = setTimeout(() => {
           child.kill('SIGKILL');
-          reject(new Error(`acpx command timed out: ${candidate.command}`));
+          reject(createAcpxTimeoutError([candidate.command, ...candidate.prefix].join(' '), timeoutMs));
         }, timeoutMs);
 
         const flushLine = (line) => {
@@ -197,9 +207,17 @@ function buildPermissionArgs(approvalMode = 'default') {
 }
 
 export class AcpxClient {
+  constructor({ commandTimeoutMs = DEFAULT_ACPX_COMMAND_TIMEOUT_MS, turnTimeoutMs = DEFAULT_ACPX_TURN_TIMEOUT_MS } = {}) {
+    this.commandTimeoutMs = commandTimeoutMs;
+    this.turnTimeoutMs = turnTimeoutMs;
+  }
+
   async ensureSession({ agentId, cwd = process.cwd(), sessionName }) {
     const name = sanitizeSessionName(sessionName ?? agentId);
-    await runAcpx(['--cwd', cwd, agentId, 'sessions', 'ensure', '--name', name], { cwd });
+    await runAcpx(['--cwd', cwd, agentId, 'sessions', 'ensure', '--name', name], {
+      cwd,
+      timeoutMs: this.commandTimeoutMs
+    });
     return createRuntimeHandle({
       runtimeSessionName: name,
       sessionKey: `${agentId}:${name}`
@@ -217,7 +235,7 @@ export class AcpxClient {
         '-s', runtimeHandle.runtimeSessionName,
         messageText
       ],
-      { cwd, onChunk }
+      { cwd, onChunk, timeoutMs: this.turnTimeoutMs }
     );
     const text = extractFinalText(result.lines);
     if (result.code !== 0 && !text) {
@@ -239,7 +257,7 @@ export class AcpxClient {
     const name = sanitizeSessionName(runtimeHandle.runtimeSessionName);
     const result = await runAcpx(
       ['--cwd', cwd, '--format', 'json', agentId, 'sessions', 'show', name],
-      { cwd, rejectOnNonZero: false }
+      { cwd, rejectOnNonZero: false, timeoutMs: this.commandTimeoutMs }
     );
     const payload = parseJsonRecord(result.stdout || result.stderr);
     if (payload?.schema === 'acpx.session.v1' && payload.closed !== true) {
@@ -281,7 +299,7 @@ export class AcpxClient {
     }
     const result = await runAcpx(
       ['--cwd', cwd, '--format', 'json', agentId, 'status', '-s', runtimeHandle.runtimeSessionName],
-      { cwd, rejectOnNonZero: false }
+      { cwd, rejectOnNonZero: false, timeoutMs: this.commandTimeoutMs }
     );
     const payload = parseJsonRecord(result.stdout || result.stderr);
     if (result.code !== 0) {
@@ -302,7 +320,7 @@ export class AcpxClient {
     }
     const result = await runAcpx(
       ['--cwd', cwd, agentId, 'cancel', '-s', runtimeHandle.runtimeSessionName],
-      { cwd, rejectOnNonZero: false }
+      { cwd, rejectOnNonZero: false, timeoutMs: this.commandTimeoutMs }
     );
     if (result.code !== 0) {
       return {
@@ -315,7 +333,10 @@ export class AcpxClient {
 
   async close({ agentId, runtimeHandle, cwd = process.cwd() } = {}) {
     if (!agentId || !runtimeHandle?.runtimeSessionName) return { ok: true, skipped: true };
-    await runAcpx(['--cwd', cwd, agentId, 'sessions', 'close', runtimeHandle.runtimeSessionName], { cwd });
+    await runAcpx(['--cwd', cwd, agentId, 'sessions', 'close', runtimeHandle.runtimeSessionName], {
+      cwd,
+      timeoutMs: this.commandTimeoutMs
+    });
     return { ok: true };
   }
 }
