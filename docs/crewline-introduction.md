@@ -1,6 +1,7 @@
 # Crewline：用微信、飞书远程控制你的Claude Code、Codex
 
 > 开源项目地址：https://github.com/rongyan6/crewline
+> 中文文档：https://github.com/rongyan6/crewline/blob/main/README.zh-CN.md
 
 ---
 
