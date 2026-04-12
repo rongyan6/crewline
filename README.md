@@ -153,17 +153,22 @@ If `crewline doctor` reports missing items, fix `~/.crewline/crewline.json` and 
 
 ## 6. Manage the Service
 
-Stop or restart the gateway:
+For development, the default service commands use the direct process mode and do not use launchd:
 
 ```bash
+crewline start
 crewline stop
 crewline restart
+crewline status
 ```
 
-Install or remove the macOS background service when you want it managed by launchd:
+Only use launchd for production-style background management on macOS:
 
 ```bash
 crewline install
+crewline prod-start
+crewline prod-status
+crewline prod-stop
 crewline uninstall
 ```
 

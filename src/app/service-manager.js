@@ -24,6 +24,10 @@ import {
 
 const appMain = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'main.js');
 
+function normalizeServiceMode(mode = 'direct') {
+  return mode === 'launchd' ? 'launchd' : 'direct';
+}
+
 function ensureRuntimeHome(paths) {
   const { runtimeHome, defaultLogDir } = paths;
   fs.mkdirSync(runtimeHome, { recursive: true });
@@ -100,7 +104,7 @@ export async function ensureConfigReady(env = process.env) {
   };
 }
 
-export async function startService() {
+async function startDirectService() {
   const paths = resolveServicePaths();
   ensureRuntimeHome(paths);
   const readiness = await ensureConfigReady();
@@ -114,40 +118,23 @@ export async function startService() {
 
   const { resolvedConfig } = await loadUserConfigAndEnv();
   const logDir = resolvedConfig.logging?.dir ?? paths.defaultLogDir;
-  const launchdPlistPath = resolveLaunchAgentPlistPath();
+
   if (supportsLaunchd()) {
-    if (fs.existsSync(launchdPlistPath)) {
-      const status = await readLaunchAgentStatus();
-      if (status.running) {
-        await cleanupStaleCrewlineProcesses({ keepPids: [status.pid] });
-        return {
-          started: false,
-          reason: 'already-running',
-          mode: 'launchd',
-          label: status.label,
-          pid: status.pid ?? null
-        };
-      }
-      const { logFile } = await prepareStartupLogFile({
-        logDir,
-        retentionDays: 7
-      });
-      const result = await startLaunchAgent(launchdPlistPath);
-      const nextStatus = await readLaunchAgentStatus();
-      await cleanupStaleCrewlineProcesses({ keepPids: [nextStatus.pid] });
+    const launchdStatus = await readLaunchAgentStatus();
+    if (launchdStatus.running) {
       return {
-        started: true,
+        started: false,
+        reason: 'launchd-running',
         mode: 'launchd',
-        label: result.label,
-        action: result.action,
-        pid: nextStatus.pid ?? null,
-        logFile
+        label: launchdStatus.label,
+        pid: launchdStatus.pid ?? null
       };
     }
   }
+
   const existingPid = await readPidFile();
   if (isProcessRunning(existingPid)) {
-    return { started: false, reason: 'already-running', pid: existingPid };
+    return { started: false, reason: 'already-running', mode: 'direct', pid: existingPid };
   }
   const { logFile } = await prepareStartupLogFile({
     logDir,
@@ -167,34 +154,108 @@ export async function startService() {
   child.unref();
   await fsp.writeFile(paths.pidFilePath, `${child.pid}
 `, 'utf8');
-  return { started: true, pid: child.pid, logFile };
+  return { started: true, mode: 'direct', pid: child.pid, logFile };
 }
 
-export async function stopService() {
+async function startLaunchdService() {
   const paths = resolveServicePaths();
-  if (supportsLaunchd() && fs.existsSync(resolveLaunchAgentPlistPath())) {
-    try {
-      const result = await stopLaunchAgent();
-      await cleanupStaleCrewlineProcesses({ keepPids: [] });
-      await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
-      return { stopped: true, mode: 'launchd', label: result.label };
-    } catch (error) {
-      return { stopped: false, reason: 'launchd-stop-failed', error: error?.message ?? String(error) };
-    }
+  ensureRuntimeHome(paths);
+  if (!supportsLaunchd()) {
+    return { started: false, reason: 'launchd-unsupported', platform: process.platform };
   }
+  const readiness = await ensureConfigReady();
+  if (!readiness.ok) {
+    return {
+      started: false,
+      reason: 'config-incomplete',
+      readiness
+    };
+  }
+  const { resolvedConfig } = await loadUserConfigAndEnv();
+  const logDir = resolvedConfig.logging?.dir ?? paths.defaultLogDir;
+  const launchdPlistPath = resolveLaunchAgentPlistPath();
+  if (!fs.existsSync(launchdPlistPath)) {
+    return {
+      started: false,
+      reason: 'launchd-not-installed',
+      mode: 'launchd',
+      plistPath: launchdPlistPath
+    };
+  }
+  const status = await readLaunchAgentStatus();
+  if (status.running) {
+    await cleanupStaleCrewlineProcesses({ keepPids: [status.pid] });
+    return {
+      started: false,
+      reason: 'already-running',
+      mode: 'launchd',
+      label: status.label,
+      pid: status.pid ?? null
+    };
+  }
+  const { logFile } = await prepareStartupLogFile({
+    logDir,
+    retentionDays: 7
+  });
+  const result = await startLaunchAgent(launchdPlistPath);
+  const nextStatus = await readLaunchAgentStatus();
+  await cleanupStaleCrewlineProcesses({ keepPids: [nextStatus.pid] });
+  return {
+    started: true,
+    mode: 'launchd',
+    label: result.label,
+    action: result.action,
+    pid: nextStatus.pid ?? null,
+    logFile
+  };
+}
+
+export async function startService({ mode = 'direct' } = {}) {
+  return normalizeServiceMode(mode) === 'launchd'
+    ? await startLaunchdService()
+    : await startDirectService();
+}
+
+async function stopDirectService() {
+  const paths = resolveServicePaths();
   const pid = await readPidFile();
   if (!pid || !isProcessRunning(pid)) {
     try { await fsp.rm(paths.pidFilePath, { force: true }); } catch {}
-    return { stopped: false, reason: 'not-running' };
+    return { stopped: false, mode: 'direct', reason: 'not-running' };
   }
   process.kill(pid, 'SIGTERM');
   await fsp.rm(paths.pidFilePath, { force: true });
-  return { stopped: true, pid };
+  return { stopped: true, mode: 'direct', pid };
 }
 
-export async function restartService() {
-  const stopped = await stopService();
-  const started = await startService();
+async function stopLaunchdService() {
+  const paths = resolveServicePaths();
+  if (!supportsLaunchd()) {
+    return { stopped: false, reason: 'launchd-unsupported', platform: process.platform };
+  }
+  if (!fs.existsSync(resolveLaunchAgentPlistPath())) {
+    return { stopped: false, mode: 'launchd', reason: 'not-installed' };
+  }
+  try {
+    const result = await stopLaunchAgent();
+    await cleanupStaleCrewlineProcesses({ keepPids: [] });
+    await fsp.rm(paths.pidFilePath, { force: true }).catch(() => undefined);
+    return { stopped: true, mode: 'launchd', label: result.label };
+  } catch (error) {
+    return { stopped: false, mode: 'launchd', reason: 'launchd-stop-failed', error: error?.message ?? String(error) };
+  }
+}
+
+export async function stopService({ mode = 'direct' } = {}) {
+  return normalizeServiceMode(mode) === 'launchd'
+    ? await stopLaunchdService()
+    : await stopDirectService();
+}
+
+export async function restartService({ mode = 'direct' } = {}) {
+  const normalizedMode = normalizeServiceMode(mode);
+  const stopped = await stopService({ mode: normalizedMode });
+  const started = await startService({ mode: normalizedMode });
   return { stopped, started };
 }
 
@@ -215,7 +276,10 @@ export async function installService() {
     stderrPath: path.join(resolvedConfig.logging?.dir ?? paths.defaultLogDir, 'crewline-service.err.log')
   };
   fs.mkdirSync(logDir, { recursive: true });
-  const environment = buildServiceEnvironment(process.env);
+  const environment = buildServiceEnvironment({
+    ...process.env,
+    CREWLINE_SERVICE_MODE: 'launchd'
+  });
   const plist = buildLaunchAgentPlist({
     programArguments: [process.execPath, appMain],
     workingDirectory: process.cwd(),
@@ -244,24 +308,49 @@ export async function uninstallService() {
   return { uninstalled: true, ...result };
 }
 
-export async function getServiceStatus() {
+async function getDirectServiceStatus() {
   const paths = resolveServicePaths();
   const pid = await readPidFile();
   const serviceState = await readServiceState();
+  const pidRunning = isProcessRunning(pid);
+  return {
+    running: pidRunning,
+    pid: pidRunning ? pid : null,
+    mode: 'direct',
+    command: pidRunning
+      ? {
+          programArguments: [process.execPath, appMain],
+          workingDirectory: process.cwd()
+        }
+      : null,
+    paths,
+    launchd: supportsLaunchd()
+      ? await readLaunchAgentStatus()
+      : { installed: false, loaded: false, running: false },
+    serviceState
+  };
+}
+
+async function getLaunchdServiceStatus() {
+  const paths = resolveServicePaths();
   const launchd = supportsLaunchd()
     ? await readLaunchAgentStatus()
     : { installed: false, loaded: false, running: false };
-  const command = supportsLaunchd() ? await readLaunchAgentProgramArguments().catch(() => null) : null;
-  const pidRunning = isProcessRunning(pid);
-  const running = launchd.running || (!launchd.installed && pidRunning);
   return {
-    running,
-    pid: launchd.pid ?? (pidRunning ? pid : null),
-    command,
+    running: launchd.running,
+    pid: launchd.pid ?? null,
+    mode: 'launchd',
+    command: supportsLaunchd() ? await readLaunchAgentProgramArguments().catch(() => null) : null,
     paths,
     launchd,
-    serviceState
+    serviceState: await readServiceState()
   };
+}
+
+export async function getServiceStatus({ mode = 'direct' } = {}) {
+  return normalizeServiceMode(mode) === 'launchd'
+    ? await getLaunchdServiceStatus()
+    : await getDirectServiceStatus();
 }
 
 export function formatReadinessMessage(readiness) {

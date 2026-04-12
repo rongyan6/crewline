@@ -100,7 +100,7 @@ async function main() {
       return;
     }
     case 'start': {
-      const result = await startService();
+      const result = await startService({ mode: 'direct' });
       if (result.started) {
         console.log(`Crewline started${result.pid ? ` (pid: ${result.pid})` : ''}`);
         if (result.mode) console.log(`mode: ${result.mode}`);
@@ -112,6 +112,11 @@ async function main() {
         console.log(`Crewline is already running (pid: ${result.pid})`);
         return;
       }
+      if (result.reason === 'launchd-running') {
+        console.log('Crewline production launchd service is running. Stop it with `crewline prod-stop` or remove it with `crewline uninstall` before starting a direct dev service.');
+        process.exitCode = 1;
+        return;
+      }
       if (result.reason === 'config-incomplete') {
         console.log(formatReadinessMessage(result.readiness));
         process.exitCode = 2;
@@ -121,7 +126,7 @@ async function main() {
       return;
     }
     case 'stop': {
-      const result = await stopService();
+      const result = await stopService({ mode: 'direct' });
       if (result.stopped) {
         console.log(`Crewline stopped (pid: ${result.pid})`);
       } else {
@@ -130,10 +135,15 @@ async function main() {
       return;
     }
     case 'restart': {
-      const result = await restartService();
+      const result = await restartService({ mode: 'direct' });
       if (result.started?.started) {
         console.log('Crewline restarted.');
         console.log(`pid: ${result.started.pid}`);
+        return;
+      }
+      if (result.started?.reason === 'launchd-running') {
+        console.log('Crewline production launchd service is running. Stop it with `crewline prod-stop` or remove it with `crewline uninstall` before restarting a direct dev service.');
+        process.exitCode = 1;
         return;
       }
       if (result.started?.reason === 'config-incomplete') {
@@ -142,6 +152,58 @@ async function main() {
         return;
       }
       process.exitCode = 1;
+      return;
+    }
+    case 'prod-start': {
+      const result = await startService({ mode: 'launchd' });
+      if (result.started) {
+        console.log(`Crewline production service started${result.pid ? ` (pid: ${result.pid})` : ''}`);
+        if (result.label) console.log(`label: ${result.label}`);
+        if (result.logFile) console.log(`log: ${result.logFile}`);
+        return;
+      }
+      if (result.reason === 'already-running') {
+        console.log(`Crewline production service is already running (pid: ${result.pid})`);
+        return;
+      }
+      if (result.reason === 'config-incomplete') {
+        console.log(formatReadinessMessage(result.readiness));
+        process.exitCode = 2;
+        return;
+      }
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+    case 'prod-stop': {
+      const result = await stopService({ mode: 'launchd' });
+      if (result.stopped) {
+        console.log(`Crewline production service stopped${result.label ? ` (${result.label})` : ''}`);
+        return;
+      }
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+    case 'prod-restart': {
+      const result = await restartService({ mode: 'launchd' });
+      if (result.started?.started) {
+        console.log('Crewline production service restarted.');
+        console.log(`pid: ${result.started.pid}`);
+        return;
+      }
+      if (result.started?.reason === 'config-incomplete') {
+        console.log(formatReadinessMessage(result.started.readiness));
+        process.exitCode = 2;
+        return;
+      }
+      console.log(JSON.stringify(result, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+    case 'prod-status': {
+      const status = await getServiceStatus({ mode: 'launchd' });
+      console.log(JSON.stringify(status, null, 2));
       return;
     }
     case 'install': {
@@ -173,13 +235,13 @@ async function main() {
       return;
     }
     case 'status': {
-      const status = await getServiceStatus();
+      const status = await getServiceStatus({ mode: 'direct' });
       console.log(JSON.stringify(status, null, 2));
       return;
     }
     case 'health': {
       const readiness = await ensureConfigReady();
-      const status = await getServiceStatus();
+      const status = await getServiceStatus({ mode: 'direct' });
       const serviceState = await readServiceState();
       const metricsPath = path.join(status.serviceState?.runtimeHome ?? runtimePaths.runtimeHome, 'metrics', 'snapshot.json');
       const metrics = await readJson(metricsPath, null);
