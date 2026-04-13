@@ -6,6 +6,7 @@ import {
   DEFAULT_WECHAT_API_BASE_URL,
   assertWechatSessionActive,
   getContextToken,
+  getWechatTypingConfig,
   listWechatAccounts,
   loginWechatChannel,
   normalizeWechatInboundEvent,
@@ -202,6 +203,47 @@ test('sendWechatMessage posts directly to ilink sendmessage with stored token/co
   assert.equal(body.msg.to_user_id, 'wxid_alice');
   assert.equal(body.msg.context_token, 'ctx-2');
   assert.equal(body.msg.item_list[0].text_item.text, 'reply text');
+});
+
+test('getWechatTypingConfig falls back to stored context token for the same user', async () => {
+  const dataDir = await import('node:fs/promises').then((fs) =>
+    fs.mkdtemp(path.join(os.tmpdir(), 'crewline-wechat-typing-config-'))
+  );
+  const bridgeConfig = resolveWechatBridgeConfig({}, { dataDir });
+  saveWechatAccount({
+    bridgeConfig,
+    accountId: 'wxbot@im.bot',
+    account: {
+      token: 'bot-token',
+      baseUrl: 'https://api-wechat.example',
+      userId: 'wxid_owner'
+    }
+  });
+  normalizeWechatInboundEvent({
+    accountId: 'wxbot@im.bot',
+    bridgeConfig,
+    message: {
+      from_user_id: 'wxid_alice',
+      context_token: 'ctx-typing',
+      item_list: [{ type: 1, text_item: { text: 'hi' } }]
+    }
+  });
+
+  let body = null;
+  const result = await getWechatTypingConfig({
+    config: {},
+    dataDir,
+    accountId: 'wxbot@im.bot',
+    userId: 'wxid_alice',
+    fetchImpl: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return createJsonResponse({ typing_ticket: 'ticket-1' });
+    }
+  });
+
+  assert.equal(result.typingTicket, 'ticket-1');
+  assert.equal(body.ilink_user_id, 'wxid_alice');
+  assert.equal(body.context_token, 'ctx-typing');
 });
 
 test('probeWechatChannel reports whether any logged-in accounts exist', async () => {

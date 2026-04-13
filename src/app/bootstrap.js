@@ -247,6 +247,7 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
   const telegramTypingStartDelayMs = config.runtime?.telegramTypingStartDelayMs ?? 0;
   const telegramTypingIntervalMs = config.runtime?.telegramTypingIntervalMs ?? 4500;
   const feishuTypingMinVisibleMs = config.runtime?.feishuTypingMinVisibleMs ?? 1200;
+  const wechatTypingMinVisibleMs = config.runtime?.wechatTypingMinVisibleMs ?? 1200;
   let inFlightTurns = 0;
   const idleWaiters = new Set();
 
@@ -583,7 +584,17 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       }
 
       if (inboundMessage.channel === 'wechat' && wechatPlugin) {
-        stopTyping = await wechatPlugin.createTypingSession(inboundMessage);
+        const typingStartedAt = Date.now();
+        const stopWechatTyping = await wechatPlugin.createTypingSession(inboundMessage);
+        if (stopWechatTyping) {
+          stopTyping = async () => {
+            const remainingVisibleMs = wechatTypingMinVisibleMs - (Date.now() - typingStartedAt);
+            if (remainingVisibleMs > 0) {
+              await delay(remainingVisibleMs);
+            }
+            await stopWechatTyping();
+          };
+        }
       }
 
       if (inboundMessage.channel === 'feishu' && inboundMessage.messageId && feishuPlugin) {

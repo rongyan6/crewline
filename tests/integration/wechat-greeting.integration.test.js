@@ -120,3 +120,63 @@ test('bootstrap uses first-session greeting for wechat hello and routes later he
   assert.equal(runtimeClient.calls[0], 'hi');
   assert.equal(sent[1].text, 'wechat runtime ok');
 });
+
+test('bootstrap keeps wechat typing visible for fast turns', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-wechat-typing-'));
+  const runtimeClient = new FakeRuntimeClient({ text: 'wechat runtime ok' });
+  const baseConfig = wechatConfigFor(dir);
+  const app = await bootstrap({
+    config: {
+      ...baseConfig,
+      runtime: {
+        ...baseConfig.runtime,
+        wechatTypingMinVisibleMs: 40
+      }
+    },
+    runtimeClient
+  });
+
+  const sent = [];
+  let typingStartedAt = null;
+  let typingStoppedAt = null;
+  app.wechatPlugin.bridge.resolveConfig = () => ({});
+  app.wechatPlugin.bridge.normalizeInbound = ({ accountId }) => ({
+    accountId,
+    conversationRef: {
+      channel: 'wechat',
+      accountId,
+      conversationId: 'wxid_alice',
+      participantId: 'wxid_alice',
+      scope: 'dm'
+    },
+    senderRef: { userId: 'wxid_alice' },
+    messageId: `m-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    rawMeta: { contextToken: 'ctx-1' }
+  });
+  app.wechatPlugin.bridge.send = async ({ outboundMessage }) => {
+    sent.push(outboundMessage);
+    return { ok: true, messageId: `m${sent.length}` };
+  };
+  app.wechatPlugin.createTypingSession = async () => {
+    typingStartedAt = Date.now();
+    return async () => {
+      typingStoppedAt = Date.now();
+    };
+  };
+
+  await app.channelHost.dispatchRawEvent('wechat', {
+    accountId: 'bot@im.bot',
+    message: {
+      create_time_ms: Date.now(),
+      item_list: [{ type: 1, text_item: { text: 'please think' } }]
+    }
+  });
+
+  assert.equal(runtimeClient.calls.length, 1);
+  assert.equal(runtimeClient.calls[0], 'please think');
+  assert.equal(sent.at(-1)?.text, 'wechat runtime ok');
+  assert.equal(typeof typingStartedAt, 'number');
+  assert.equal(typeof typingStoppedAt, 'number');
+  assert.equal(typingStoppedAt - typingStartedAt >= 40, true);
+});

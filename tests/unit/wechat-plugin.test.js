@@ -97,6 +97,47 @@ test('wechat plugin creates typing session through bridge hooks', async () => {
   assert.equal(calls[2][1].status, 2);
 });
 
+test('wechat plugin refreshes typing ticket when context token changes', async () => {
+  const calls = [];
+  const plugin = new WechatChannelPlugin({
+    config: { enabled: true },
+    dataDir: '/tmp/crewline-wechat-plugin',
+    bridge: {
+      listAccounts() { return []; },
+      normalizeInbound() { return null; },
+      async poll() {},
+      resolveConfig() { return {}; },
+      async send() { return { ok: true, messageId: 'm1' }; },
+      async probe() { return { ok: true, channel: 'wechat' }; },
+      async getTypingConfig(input) {
+        calls.push(['getTypingConfig', input]);
+        return { typingTicket: `ticket-${input.contextToken}` };
+      },
+      async sendTyping(input) {
+        calls.push(['sendTyping', input]);
+        return true;
+      }
+    }
+  });
+
+  const firstStop = await plugin.createTypingSession({
+    accountId: 'wxbot@im.bot',
+    conversationRef: { participantId: 'wxid_alice' },
+    rawMeta: { contextToken: 'ctx-1' }
+  });
+  await firstStop?.();
+  const secondStop = await plugin.createTypingSession({
+    accountId: 'wxbot@im.bot',
+    conversationRef: { participantId: 'wxid_alice' },
+    rawMeta: { contextToken: 'ctx-2' }
+  });
+  await secondStop?.();
+
+  assert.equal(calls.filter(([name]) => name === 'getTypingConfig').length, 2);
+  assert.equal(calls[1][1].typingTicket, 'ticket-ctx-1');
+  assert.equal(calls[4][1].typingTicket, 'ticket-ctx-2');
+});
+
 test('wechat plugin handles slash commands locally', async () => {
   const plugin = new WechatChannelPlugin({
     config: { enabled: true },

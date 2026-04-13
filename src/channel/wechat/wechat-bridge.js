@@ -766,10 +766,15 @@ export async function getWechatTypingConfig({
   const account = loadWechatAccount({ bridgeConfig, accountId });
   if (!account?.token) return { typingTicket: '' };
   assertWechatSessionActive(accountId);
+  const resolvedContextToken = contextToken ?? getContextToken({
+    bridgeConfig,
+    accountId,
+    userId
+  });
   const api = createWechatApi({ account, bridgeConfig, fetchImpl });
   const response = await api.getConfig({
     ilinkUserId: userId,
-    contextToken
+    contextToken: resolvedContextToken
   });
   return {
     typingTicket: response?.typing_ticket ?? ''

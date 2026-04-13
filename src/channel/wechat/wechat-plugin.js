@@ -131,8 +131,8 @@ export class WechatChannelPlugin {
     const userId = inboundMessage.conversationRef?.participantId;
     const contextToken = inboundMessage.rawMeta?.contextToken;
     if (!accountId || !userId) return null;
-    const cacheKey = `${accountId}:${userId}`;
-    const cached = this.typingTicketCache.get(cacheKey) ?? null;
+    const cacheKey = contextToken ? `${accountId}:${userId}:${contextToken}` : null;
+    const cached = cacheKey ? (this.typingTicketCache.get(cacheKey) ?? null) : null;
     let typingTicket = cached?.value ?? '';
     if (!typingTicket || (cached?.expiresAt ?? 0) <= Date.now()) {
       try {
@@ -144,7 +144,7 @@ export class WechatChannelPlugin {
           contextToken
         });
         typingTicket = config.typingTicket ?? '';
-        if (typingTicket) {
+        if (typingTicket && cacheKey) {
           this.typingTicketCache.set(cacheKey, {
             value: typingTicket,
             expiresAt: Date.now() + (24 * 60 * 60 * 1000)

@@ -1,6 +1,6 @@
 {
   "name": "crewline",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "A gateway where humans and local AI agents collaborate.",
   "type": "module",
   "homepage": "https://github.com/rongyan6/crewline#readme",
