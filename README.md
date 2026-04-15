@@ -198,6 +198,24 @@ crewline doctor feishu
 crewline doctor wechat
 ```
 
+Send a proactive outbound message from scripts or external callers without starting a conversation:
+
+```bash
+crewline push telegram --list
+crewline push telegram --chat-id -1001234567890 --text "deploy finished"
+crewline push telegram --chat-id -1001234567890 --topic-id 42 --stdin
+crewline push feishu --account your_app_id --chat-id oc_xxx --text "build passed"
+crewline push wechat --account bot@im.bot --user-id wxid_xxx --text "agent finished"
+```
+
+Notes:
+
+- `telegram` requires `--chat-id`, and supports `--topic-id` for forum topics
+- `feishu` requires `--chat-id`
+- `wechat` requires both `--account` and `--user-id`
+- `--list` shows known targets grouped by `dm`, `group`, and `topic`
+- message content can come from `--text` or `--stdin`
+
 ## 7. Remote Admin Commands
 
 Crewline also supports a small set of remote admin commands over IM.

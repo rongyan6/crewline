@@ -203,6 +203,24 @@ WeChat 首次扫码登录：
 crewline wechat login
 ```
 
+如果你希望让外部脚本或命令主动推送消息，也可以直接调用：
+
+```bash
+crewline push telegram --list
+crewline push telegram --chat-id -1001234567890 --text "deploy finished"
+crewline push telegram --chat-id -1001234567890 --topic-id 42 --stdin
+crewline push feishu --account your_app_id --chat-id oc_xxx --text "build passed"
+crewline push wechat --account bot@im.bot --user-id wxid_xxx --text "agent finished"
+```
+
+说明：
+
+- `telegram` 必须提供 `--chat-id`，发 Topic 时再加 `--topic-id`
+- `feishu` 必须提供 `--chat-id`
+- `wechat` 必须同时提供 `--account` 和 `--user-id`
+- `--list` 会把当前已知的可发目标按 `dm`、`group`、`topic` 分组列出来
+- 消息内容可以通过 `--text` 或 `--stdin` 传入
+
 ## 7. 远程管理命令
 
 Crewline 也支持通过 IM 执行一组远程管理命令。

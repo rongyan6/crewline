@@ -19,6 +19,7 @@ import { resolveRuntimePaths } from '../src/app/runtime-paths.js';
 import { resolveDoctorScript } from '../src/app/doctor-command.js';
 import { initializeCrewlineProject } from '../src/app/init-command.js';
 import { formatHelp } from '../src/app/help-command.js';
+import { formatPushHelp, runPushCommand } from '../src/app/push-command.js';
 
 const command = process.argv[2] ?? 'start';
 const extraArgs = process.argv.slice(3);
@@ -97,6 +98,26 @@ async function main() {
       }
       console.log('Usage: crewline wechat <login>');
       process.exitCode = 1;
+      return;
+    }
+    case 'push': {
+      if (!subcommand || subcommand === '--help' || subcommand === '-h') {
+        console.log(formatPushHelp());
+        return;
+      }
+      try {
+        const result = await runPushCommand({
+          channel: subcommand,
+          argv: extraArgs.slice(1),
+          stdin: process.stdin
+        });
+        console.log(JSON.stringify(result, null, 2));
+      } catch (error) {
+        console.error(error?.message ?? String(error));
+        console.error('');
+        console.error(formatPushHelp());
+        process.exitCode = 1;
+      }
       return;
     }
     case 'start': {
