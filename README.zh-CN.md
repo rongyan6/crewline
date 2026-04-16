@@ -221,6 +221,22 @@ crewline push wechat --account bot@im.bot --user-id wxid_xxx --text "agent finis
 - `--list` 会把当前已知的可发目标按 `dm`、`group`、`topic` 分组列出来
 - 消息内容可以通过 `--text` 或 `--stdin` 传入
 
+如果你希望在外部事件发生时先在 IM 里发一条可见提示，再真正触发绑定的 Agent，可以直接调用：
+
+```bash
+crewline trigger telegram --chat-id -1001234567890 --text "构建失败，请检查"
+crewline trigger telegram --chat-id -1001234567890 --topic-id 42 --stdin
+crewline trigger feishu --chat-id oc_xxx --scope dm --participant-id ou_xxx --text "新告警"
+crewline trigger wechat --account bot@im.bot --user-id wxid_xxx --text "定时巡检"
+```
+
+说明：
+
+- `trigger` 会先发一条可见消息，例如 `触发：构建失败，请检查`
+- 然后再把同样的前缀文本注入到对应 Agent 会话里
+- `trigger --list` 复用 `push --list` 的目标发现逻辑
+- 飞书私聊 trigger 如果这个 `chat-id` 在运行期历史里已经出现过，可以自动回填参与者；否则请显式传 `--participant-id`
+
 ## 7. 远程管理命令
 
 Crewline 也支持通过 IM 执行一组远程管理命令。

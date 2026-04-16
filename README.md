@@ -216,6 +216,22 @@ Notes:
 - `--list` shows known targets grouped by `dm`, `group`, and `topic`
 - message content can come from `--text` or `--stdin`
 
+Trigger a bound Agent from external scripts while also posting a visible notice back into IM:
+
+```bash
+crewline trigger telegram --chat-id -1001234567890 --text "build failed, please inspect"
+crewline trigger telegram --chat-id -1001234567890 --topic-id 42 --stdin
+crewline trigger feishu --chat-id oc_xxx --scope dm --participant-id ou_xxx --text "new alert"
+crewline trigger wechat --account bot@im.bot --user-id wxid_xxx --text "scheduled inspection"
+```
+
+Notes:
+
+- `trigger` first sends a visible message like `触发：build failed, please inspect`
+- it then injects the same prefixed text into the bound Agent conversation
+- `trigger --list` reuses the same known target discovery as `push --list`
+- Feishu direct-message triggers can auto-resolve the participant from runtime history when the `chat-id` was seen before; otherwise pass `--participant-id`
+
 ## 7. Remote Admin Commands
 
 Crewline also supports a small set of remote admin commands over IM.

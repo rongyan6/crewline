@@ -272,8 +272,9 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
     });
   }
 
-  channelHost.setInboundHandler(async (inboundMessage) => {
+  const handleInboundMessage = async (inboundMessage) => {
     inFlightTurns += 1;
+    const isSyntheticTrigger = inboundMessage.rawMeta?.syntheticTrigger === true;
     const telegramAccountConfig = inboundMessage.channel === 'telegram'
       ? (telegramPlugin?.getAccountConfig(inboundMessage.accountId) ?? telegramConfig)
       : null;
@@ -283,7 +284,8 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       scope: inboundMessage.conversationRef.scope,
       conversationId: inboundMessage.conversationRef.conversationId,
       senderId: inboundMessage.senderRef.userId,
-      text: inboundMessage.text
+      text: inboundMessage.text,
+      source: isSyntheticTrigger ? 'synthetic-trigger' : 'channel'
     });
     await metrics.increment('messages.inbound', 1, {
       channel: inboundMessage.channel,
@@ -309,64 +311,66 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
             layer: 'channel'
           })
         : null,
-      meta: { source: 'channel' }
+      meta: { source: isSyntheticTrigger ? 'synthetic-trigger' : 'channel' }
     });
 
-    const adminResult = await handleAdminCommand({
-      inboundMessage,
-      config,
-      live: {
-        runtimeHome: config.runtime?.dataDir,
-        channelHost,
-        runtimeGateway,
-        stateStore,
-        metrics
-      }
-    });
-    if (adminResult?.handled) {
-      if (adminResult.suppressReply === true) {
-        logger.info('[crewline.admin.duplicate]', {
-          channel: inboundMessage.channel,
-          messageId: inboundMessage.messageId ?? null,
-          conversationId: inboundMessage.conversationRef.conversationId,
-          command: inboundMessage.text
-        });
-        return { inboundMessage, localReply: false, adminCommand: true, duplicate: true };
-      }
-      const sendResult = await channelHost.send(createOutboundMessage({
-        channel: inboundMessage.channel,
-        accountId: inboundMessage.accountId,
-        conversationRef: inboundMessage.conversationRef,
-        text: adminResult.text,
-        replyTo: buildInlineReplyTarget(inboundMessage),
-        meta: buildTelegramReplyMeta(inboundMessage)
-      }));
-      await appendConversationLog({
+    if (!isSyntheticTrigger) {
+      const adminResult = await handleAdminCommand({
         inboundMessage,
-        role: 'system',
-        text: adminResult.text,
-        messageId: sendResult?.messageId ?? null,
-        attachments: [],
-        error: null,
-        meta: {
-          reason: 'admin-command',
-          command: inboundMessage.text,
-          sourceMessageId: inboundMessage.messageId ?? null
+        config,
+        live: {
+          runtimeHome: config.runtime?.dataDir,
+          channelHost,
+          runtimeGateway,
+          stateStore,
+          metrics
         }
       });
-      await metrics.increment('messages.local_reply', 1, {
-        channel: inboundMessage.channel,
-        scope: inboundMessage.conversationRef.scope
-      });
-      await audit.record({
-        event: 'message.local_reply',
-        channel: inboundMessage.channel,
-        scope: inboundMessage.conversationRef.scope,
-        conversationId: inboundMessage.conversationRef.conversationId,
-        reason: 'admin-command'
-      });
-      await adminResult.postSendAction?.();
-      return { inboundMessage, localReply: true, adminCommand: true, sendResult };
+      if (adminResult?.handled) {
+        if (adminResult.suppressReply === true) {
+          logger.info('[crewline.admin.duplicate]', {
+            channel: inboundMessage.channel,
+            messageId: inboundMessage.messageId ?? null,
+            conversationId: inboundMessage.conversationRef.conversationId,
+            command: inboundMessage.text
+          });
+          return { inboundMessage, localReply: false, adminCommand: true, duplicate: true };
+        }
+        const sendResult = await channelHost.send(createOutboundMessage({
+          channel: inboundMessage.channel,
+          accountId: inboundMessage.accountId,
+          conversationRef: inboundMessage.conversationRef,
+          text: adminResult.text,
+          replyTo: buildInlineReplyTarget(inboundMessage),
+          meta: buildTelegramReplyMeta(inboundMessage)
+        }));
+        await appendConversationLog({
+          inboundMessage,
+          role: 'system',
+          text: adminResult.text,
+          messageId: sendResult?.messageId ?? null,
+          attachments: [],
+          error: null,
+          meta: {
+            reason: 'admin-command',
+            command: inboundMessage.text,
+            sourceMessageId: inboundMessage.messageId ?? null
+          }
+        });
+        await metrics.increment('messages.local_reply', 1, {
+          channel: inboundMessage.channel,
+          scope: inboundMessage.conversationRef.scope
+        });
+        await audit.record({
+          event: 'message.local_reply',
+          channel: inboundMessage.channel,
+          scope: inboundMessage.conversationRef.scope,
+          conversationId: inboundMessage.conversationRef.conversationId,
+          reason: 'admin-command'
+        });
+        await adminResult.postSendAction?.();
+        return { inboundMessage, localReply: true, adminCommand: true, sendResult };
+      }
     }
 
     if (typeof inboundMessage.rawMeta?.localReplyText === 'string' && inboundMessage.rawMeta.localReplyText) {
@@ -412,7 +416,7 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       return { inboundMessage, localReply: true, sendResult };
     }
 
-    if (isSimpleWechatGreeting(inboundMessage.text)) {
+    if (!isSyntheticTrigger && isSimpleWechatGreeting(inboundMessage.text)) {
       const userTurnCount = await stateStore.conversationLog.countRole(
         conversationLogPath({
           dataDir: stateStore.dataDir,
@@ -460,7 +464,7 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       }
     }
 
-    if (inboundMessage.channel === 'telegram') {
+    if (inboundMessage.channel === 'telegram' && !isSyntheticTrigger) {
       if (inboundMessage.conversationRef.scope === 'group' || inboundMessage.conversationRef.scope === 'topic') {
         const groupAllowFrom = resolveTelegramGroupAllowFrom(telegramAccountConfig, inboundMessage.conversationRef);
         if (!groupAllowFrom.includes(String(inboundMessage.senderRef.userId))) {
@@ -880,7 +884,60 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       inFlightTurns -= 1;
       settleIdleWaiters();
     }
-  });
+  };
+  channelHost.setInboundHandler(handleInboundMessage);
+
+  async function triggerInbound({ inboundMessage, noticeText }) {
+    const visibleText = String(noticeText ?? inboundMessage?.text ?? '').trim();
+    if (!visibleText) {
+      throw new Error('triggerInbound requires noticeText or inboundMessage.text');
+    }
+    logger.info('[crewline.trigger]', {
+      channel: inboundMessage.channel,
+      conversationId: inboundMessage.conversationRef.conversationId,
+      scope: inboundMessage.conversationRef.scope,
+      messageId: inboundMessage.messageId ?? null
+    });
+    const sendResult = await channelHost.send(createOutboundMessage({
+      channel: inboundMessage.channel,
+      accountId: inboundMessage.accountId,
+      conversationRef: inboundMessage.conversationRef,
+      text: visibleText,
+      meta: buildTelegramReplyMeta(inboundMessage)
+    }));
+    await appendConversationLog({
+      inboundMessage,
+      role: 'system',
+      text: visibleText,
+      messageId: sendResult?.messageId ?? null,
+      attachments: [],
+      error: null,
+      meta: {
+        reason: 'trigger-notice',
+        source: 'synthetic-trigger',
+        sourceMessageId: inboundMessage.messageId ?? null
+      }
+    });
+    await metrics.increment('messages.outbound', 1, {
+      channel: inboundMessage.channel,
+      scope: inboundMessage.conversationRef.scope,
+      role: 'system'
+    });
+    await audit.record({
+      event: 'message.outbound',
+      channel: inboundMessage.channel,
+      scope: inboundMessage.conversationRef.scope,
+      conversationId: inboundMessage.conversationRef.conversationId,
+      messageId: sendResult?.messageId ?? null,
+      outcome: 'ok',
+      reason: 'trigger-notice'
+    });
+    const triggerResult = await handleInboundMessage(inboundMessage);
+    return {
+      noticeSendResult: sendResult,
+      triggerResult
+    };
+  }
 
   return {
     logger,
@@ -895,6 +952,8 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
     runtimeGateway,
     stateStore,
     sessionManager,
-    waitForIdle
+    waitForIdle,
+    handleInboundMessage,
+    triggerInbound
   };
 }

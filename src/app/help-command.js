@@ -23,6 +23,7 @@ export function formatHelp({ defaultRuntimeHome } = {}) {
     '  uninstall                Remove macOS launchd service',
     '  wechat login             Start first-time WeChat QR login',
     '  push <channel>           Send a proactive message to Telegram/Feishu/WeChat',
+    '  trigger <channel>        Post a visible trigger message, then inject it into the bound Agent',
     '',
     'Config resolution:',
     `  1. CREWLINE_RUNTIME_HOME if set`,
