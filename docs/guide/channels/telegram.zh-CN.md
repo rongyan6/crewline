@@ -265,6 +265,7 @@ Crewline 的主配置文件默认在：
 - `/admin_stop`
 - `/admin_restart`
 - `/admin_agents`
+- `/admin_user userId=<userId>`
 - `/admin_agent_add agentId=<agentId> providerId=<claude|codex> cwd=<cwd>`
 - `/admin_agent_cwd agentId=<agentId> cwd=<cwd>`
 - `/admin_reg`
@@ -273,7 +274,14 @@ Crewline 的主配置文件默认在：
 
 - 大多数管理命令只允许私聊机器人时执行
 - `/admin_reg` 例外，它允许在 Telegram 私聊、群聊或 Topic 中执行，用来把当前会话注册到某个 Agent
+- `/admin_user` 只允许私聊机器人时执行
 - 当 `adminUserIds` 还是空数组时，`/admin_reg` 会同时把发送者 Telegram 用户 ID 和当前私聊/群/Topic 绑定一起自举写入配置
+
+已绑定的 Telegram 会话里还支持这些 Crewline 内置会话命令：
+
+- `/reset`：重建当前 Agent runtime 会话，但不清空聊天记录，也不改变绑定
+- 后续会继续补充更多 Crewline 内置会话命令
+- `/new` 不由 Crewline 处理；如果底层 provider 支持，它会被原样透传给底层 Agent runtime
 
 ## 3. 默认配置、必配项、可选能力
 

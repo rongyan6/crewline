@@ -93,6 +93,39 @@ test('session manager rotates session after maxTurnsPerSession', async () => {
   assert.equal(second.session.resolvedCwd, '/tmp');
 });
 
+test('session manager resets the current runtime session without changing the route binding', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-session-reset-'));
+  const runtimeGateway = new FakeRuntimeGateway();
+  const manager = new SessionManager({
+    stateStore: createStateStore(dir),
+    runtimeGateway
+  });
+
+  const routeDecision = {
+    conversationKey: 'telegram:dm:reset',
+    conversationRef: { channel: 'telegram', conversationId: 'reset', participantId: '123', scope: 'dm' },
+    instanceId: 'codex_cc',
+    providerId: 'codex',
+    agentName: 'codex',
+    resolvedCwd: '/tmp'
+  };
+
+  const first = await manager.runTurn({ inboundMessage: { text: 'hello' }, routeDecision });
+  const reset = await manager.resetSession(routeDecision);
+  const second = await manager.runTurn({ inboundMessage: { text: 'after reset' }, routeDecision });
+
+  assert.notEqual(reset.sessionId, first.session.sessionId);
+  assert.equal(reset.state, 'active');
+  assert.equal(reset.turnCount, 0);
+  assert.equal(second.session.sessionId, reset.sessionId);
+  assert.equal(runtimeGateway.closed, 1);
+
+  const active = await manager.stateStore.runtimeBindingStore.get(routeDecision.conversationRef);
+  assert.equal(active.sessionId, reset.sessionId);
+  assert.equal(active.instanceId, routeDecision.instanceId);
+  assert.equal(active.state, 'active');
+});
+
 test('session manager rotates idle session after ttl expiry', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-session-idle-'));
   const stateStore = createStateStore(dir);

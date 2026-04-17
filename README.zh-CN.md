@@ -237,7 +237,23 @@ crewline trigger wechat --account bot@im.bot --user-id wxid_xxx --text "定时�
 - `trigger --list` 复用 `push --list` 的目标发现逻辑
 - 飞书私聊 trigger 如果这个 `chat-id` 在运行期历史里已经出现过，可以自动回填参与者；否则请显式传 `--participant-id`
 
-## 7. 远程管理命令
+## 7. 会话内置命令
+
+Crewline 也支持一小组“会话内置命令”。这类命令会由 Crewline 自己先处理，而不是直接转发给底层 Agent runtime。
+
+当前支持：
+
+- `/reset`：重建当前 Agent 对应的 runtime 会话，但不清空聊天记录，也不改变当前绑定的 Agent 实例
+
+行为说明：
+
+- `/reset` 会保留现有会话日志和绑定文件
+- 后续消息仍然走当前已绑定会话，但会进入一个全新的 Agent runtime session
+- `/reset` 适用于已绑定的 Telegram、飞书、WeChat 会话
+- 后续会继续补充更多 Crewline 内置会话命令
+- `/new` 不是 Crewline 的内置命令；如果底层 provider 支持，Crewline 只会原样透传给底层 Agent runtime
+
+## 8. 远程管理命令
 
 Crewline 也支持通过 IM 执行一组远程管理命令。
 
@@ -250,6 +266,7 @@ Crewline 也支持通过 IM 执行一组远程管理命令。
 - `/admin_stop`：停止 Crewline 服务
 - `/admin_restart`：重启 Crewline 服务
 - `/admin_agents`：查看已配置的 agent 实例
+- `/admin_user userId=<userId>`：把指定用户加入当前通道的 `adminUserIds`
 - `/admin_agent_add agentId=<agentId> providerId=<claude|codex> cwd=<cwd>`：新增一个 agent 实例
 - `/admin_agent_cwd agentId=<agentId> cwd=<cwd>`：修改已有 agent 实例的工作目录
 - `/admin_reg`：在首次使用时注册当前 Telegram 私聊/群/Topic 或飞书私聊/群会话
@@ -259,7 +276,8 @@ Crewline 也支持通过 IM 执行一组远程管理命令。
 - 需要在 `~/.crewline/crewline.json` 里为对应通道配置 `adminUserIds`
 - 大多数管理命令只允许在私聊中使用
 - `/admin_reg` 是例外，用来注册当前 Telegram 私聊/群/Topic 或飞书私聊/群会话
-- WeChat 支持私聊管理命令，但不支持 `/admin_reg`
+- `/admin_user` 当前只支持 Telegram 和飞书私聊
+- WeChat 支持私聊管理命令，但不支持 `/admin_reg` 和 `/admin_user`
 
 行为说明：
 
@@ -271,7 +289,7 @@ Crewline 也支持通过 IM 执行一组远程管理命令。
 - `/admin_reg` 仍然要求你先完成通道基础接入配置，例如 `channel.telegram.accounts.<botId>.botToken` 或 `channel.feishu.accounts.<appId>.appSecret`
 - `/admin_stop`、`/admin_restart`、`/admin_agent_add`、`/admin_agent_cwd`、`/admin_reg` 这类会改服务状态或配置的命令，会在回执发出后再执行实际动作
 
-## 8. 正常运行后你主要会接触到的文件
+## 9. 正常运行后你主要会接触到的文件
 
 当 Crewline 正常运行后，用户最常接触的是这些内容：
 

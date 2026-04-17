@@ -338,6 +338,7 @@ Feishu currently supports:
 - `/admin_stop`
 - `/admin_restart`
 - `/admin_agents`
+- `/admin_user userId=<userId>`
 - `/admin_agent_add agentId=<agentId> providerId=<claude|codex> cwd=<cwd>`
 - `/admin_agent_cwd agentId=<agentId> cwd=<cwd>`
 - `/admin_reg`
@@ -346,7 +347,14 @@ Scope rules:
 
 - most admin commands are DM-only
 - `/admin_reg` is the exception; it can be used in Feishu DMs or groups to register the current conversation
+- `/admin_user` is DM-only
 - when `adminUserIds` is still empty, `/admin_reg` bootstraps the sender open_id and the current DM/group binding together
+
+Built-in conversation commands in bound Feishu conversations:
+
+- `/reset`: recreate the current Agent runtime session without clearing conversation history or changing the binding
+- more Crewline built-in conversation commands will be added later
+- `/new` is not handled by Crewline; it is forwarded to the underlying Agent runtime if the provider supports it
 
 ## 3. Defaults, Required Fields, And Optional Features
 

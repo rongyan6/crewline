@@ -110,6 +110,29 @@ function buildFirstSessionGreeting({ routeDecision }) {
   ].join('\n');
 }
 
+function parseSessionCommand(text = '') {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return null;
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (/^\/reset(?:@[a-z0-9_]+)?$/i.test(tokens[0])) {
+    return {
+      raw: tokens[0],
+      name: 'reset',
+      args: tokens.slice(1)
+    };
+  }
+  return null;
+}
+
+function buildSessionResetReply({ routeDecision }) {
+  return [
+    '已重置当前 Agent 会话。',
+    `当前 Agent：${formatAgentDisplayName(routeDecision.agentName)} (${routeDecision.instanceId})`,
+    '聊天记录和绑定保持不变，后续消息会进入新的 Agent 会话。'
+  ].join('\n');
+}
+
 function resolveTelegramGroupAllowFrom(config, conversationRef) {
   if (conversationRef.scope === 'topic') {
     const topicKey = `${conversationRef.conversationId}:${conversationRef.topicId ?? conversationRef.participantId ?? ''}`;
@@ -503,7 +526,51 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       }
     }
 
+    const sessionCommand = !isSyntheticTrigger ? parseSessionCommand(inboundMessage.text) : null;
     const routeDecision = router.route(inboundMessage);
+    if (sessionCommand?.name === 'reset') {
+      let replyText = '/reset 不接受参数，直接发送 /reset 即可。';
+      let session = null;
+      if (sessionCommand.args.length === 0) {
+        session = await sessionManager.resetSession(routeDecision);
+        replyText = buildSessionResetReply({ routeDecision });
+      }
+      const sendResult = await channelHost.send(createOutboundMessage({
+        channel: inboundMessage.channel,
+        accountId: inboundMessage.accountId,
+        conversationRef: inboundMessage.conversationRef,
+        text: replyText,
+        replyTo: buildInlineReplyTarget(inboundMessage),
+        meta: buildTelegramReplyMeta(inboundMessage)
+      }));
+      await appendConversationLog({
+        inboundMessage,
+        role: 'system',
+        text: replyText,
+        messageId: sendResult?.messageId ?? null,
+        attachments: [],
+        error: null,
+        meta: {
+          reason: 'session-command',
+          command: sessionCommand.raw,
+          sessionId: session?.sessionId ?? null,
+          instanceId: routeDecision.instanceId
+        }
+      });
+      await metrics.increment('messages.local_reply', 1, {
+        channel: inboundMessage.channel,
+        scope: inboundMessage.conversationRef.scope
+      });
+      await audit.record({
+        event: 'message.local_reply',
+        channel: inboundMessage.channel,
+        scope: inboundMessage.conversationRef.scope,
+        conversationId: inboundMessage.conversationRef.conversationId,
+        reason: 'session-command'
+      });
+      return { inboundMessage, localReply: true, sessionCommand: true, sendResult, routeDecision, session };
+    }
+
     let stopTyping = null;
     const streamStartedAt = Date.now();
     let firstChunkAt = null;

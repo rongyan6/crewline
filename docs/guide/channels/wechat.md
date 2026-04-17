@@ -67,7 +67,13 @@ WeChat currently supports:
 Scope rules:
 
 - WeChat admin commands are DM-only
-- `/admin_reg` is not supported on WeChat
+- `/admin_reg` and `/admin_user` are not supported on WeChat
+
+Built-in conversation commands in bound WeChat conversations:
+
+- `/reset`: recreate the current Agent runtime session without clearing conversation history or changing the binding
+- more Crewline built-in conversation commands will be added later
+- `/new` is not handled by Crewline; it is forwarded to the underlying Agent runtime if the provider supports it
 
 ## Doctor
 

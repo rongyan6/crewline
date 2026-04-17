@@ -67,7 +67,13 @@ Crewline 会拉起扫码登录流程，在本地保存 WeChat 账号，并在条
 作用范围：
 
 - 只允许在 WeChat 私聊中执行
-- 当前不支持 `/admin_reg`
+- 当前不支持 `/admin_reg` 和 `/admin_user`
+
+已绑定的 WeChat 会话里还支持这些 Crewline 内置会话命令：
+
+- `/reset`：重建当前 Agent runtime 会话，但不清空聊天记录，也不改变绑定
+- 后续会继续补充更多 Crewline 内置会话命令
+- `/new` 不由 Crewline 处理；如果底层 provider 支持，它会被原样透传给底层 Agent runtime
 
 ## 自检
 

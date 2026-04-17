@@ -232,7 +232,23 @@ Notes:
 - `trigger --list` reuses the same known target discovery as `push --list`
 - Feishu direct-message triggers can auto-resolve the participant from runtime history when the `chat-id` was seen before; otherwise pass `--participant-id`
 
-## 7. Remote Admin Commands
+## 7. Built-in Conversation Commands
+
+Crewline also supports a small set of built-in conversation commands that it handles before forwarding anything to the Agent runtime.
+
+Current built-ins:
+
+- `/reset`: recreate the current Agent runtime session without clearing conversation history or changing the bound agent instance
+
+Behavior notes:
+
+- `/reset` keeps the existing conversation log and binding file intact
+- later messages continue in the same bound conversation, but on a fresh Agent runtime session
+- `/reset` works in bound Telegram, Feishu, and WeChat conversations
+- more Crewline built-in conversation commands will be added later
+- `/new` is not a Crewline built-in command; if your provider supports it, Crewline simply forwards it to the underlying Agent runtime
+
+## 8. Remote Admin Commands
 
 Crewline also supports a small set of remote admin commands over IM.
 
@@ -245,6 +261,7 @@ Current commands:
 - `/admin_stop`: stop the Crewline service
 - `/admin_restart`: restart the Crewline service
 - `/admin_agents`: list configured agent instances
+- `/admin_user userId=<userId>`: add a user to the current channel's `adminUserIds`
 - `/admin_agent_add agentId=<agentId> providerId=<claude|codex> cwd=<cwd>`: add a new agent instance
 - `/admin_agent_cwd agentId=<agentId> cwd=<cwd>`: update the working directory of an existing agent instance
 - `/admin_reg`: register the current Telegram DM/group/topic or Feishu DM/group conversation on first use
@@ -254,7 +271,8 @@ How access works:
 - configure channel-specific `adminUserIds` in `~/.crewline/crewline.json`
 - most admin commands are DM-only
 - `/admin_reg` is the exception used to register the current Telegram DM/group/topic or Feishu DM/group conversation
-- WeChat supports the DM-only admin commands, but does not support `/admin_reg`
+- `/admin_user` currently supports Telegram and Feishu DMs only
+- WeChat supports the DM-only admin commands, but does not support `/admin_reg` or `/admin_user`
 
 Important behavior notes:
 
@@ -266,7 +284,7 @@ Important behavior notes:
 - `/admin_reg` still requires the base channel credentials to be configured first, for example `channel.telegram.accounts.<botId>.botToken` or `channel.feishu.accounts.<appId>.appSecret`
 - service-mutating commands such as `/admin_stop`, `/admin_restart`, `/admin_agent_add`, `/admin_agent_cwd`, and `/admin_reg` apply changes only after the command reply is sent
 
-## 8. Files You Will Use in Daily Operation
+## 9. Files You Will Use in Daily Operation
 
 Once Crewline is running normally, the main user-facing files are:
 

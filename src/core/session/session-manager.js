@@ -233,6 +233,40 @@ export class SessionManager {
     return recreated;
   }
 
+  async resetSessionUnlocked(routeDecision) {
+    const existing = await this.stateStore.runtimeBindingStore.get(routeDecision.conversationRef);
+    const hydrated = await this.hydrateStoredSession(existing, routeDecision);
+
+    if (hydrated?.runtimeHandle) {
+      await this.retireSession(hydrated);
+    }
+
+    if (hydrated) {
+      return this.recreateSession(routeDecision, hydrated);
+    }
+
+    const currentTime = nowIso();
+    const sessionId = randomId('session');
+    const runtimeHandle = await this.runtimeGateway.ensureSession({
+      agentId: routeDecision.agentName,
+      cwd: routeDecision.resolvedCwd,
+      sessionName: routeDecision.conversationKey
+    });
+    const active = this.normalizeSession({
+      sessionId,
+      bindingState: SessionStates.ACTIVE,
+      runtimeHandle,
+      turnCount: 0,
+      createdAt: currentTime,
+      updatedAt: currentTime,
+      lastUsedAt: currentTime,
+      lastRecoveryAt: null,
+      lastError: null
+    }, routeDecision);
+    await this.stateStore.runtimeBindingStore.set(routeDecision.conversationRef, active);
+    return active;
+  }
+
   async executeTurn(session, inboundMessage, routeDecision, options = {}) {
     const request = createRuntimeRequest({
       agentId: routeDecision.agentName,
@@ -280,6 +314,12 @@ export class SessionManager {
   async runTurn({ inboundMessage, routeDecision, onChunk }) {
     return this.enqueueConversationTask(routeDecision.conversationKey, () =>
       this.runTurnUnlocked({ inboundMessage, routeDecision, onChunk })
+    );
+  }
+
+  async resetSession(routeDecision) {
+    return this.enqueueConversationTask(routeDecision.conversationKey, () =>
+      this.resetSessionUnlocked(routeDecision)
     );
   }
 }

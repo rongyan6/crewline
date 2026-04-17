@@ -80,10 +80,12 @@ Crewline 采用 **Provider + Instance** 的两层模型：
 
 | 命令 | 功能 |
 |------|------|
+| `/admin_help` | 查看命令列表 |
 | `/admin_status` | 查看服务运行状态 |
 | `/admin_health` | 健康检查摘要 |
 | `/admin_doctor` | 配置/通道诊断 |
 | `/admin_agents` | 列出所有 Agent 实例 |
+| `/admin_user` | 把指定用户加入当前通道的管理名单 |
 | `/admin_agent_add` | 动态添加 Agent 实例 |
 | `/admin_agent_cwd` | 更新工作目录 |
 | `/admin_reg` | 注册当前会话绑定 |
@@ -91,7 +93,15 @@ Crewline 采用 **Provider + Instance** 的两层模型：
 
 这意味着你可以在手机上随时掌控全局。
 
-### 6. 会话管理与自动恢复
+### 6. 会话内置命令
+
+除了 `/admin_*`，Crewline 还支持自己处理一小组会话内置命令。
+
+- `/reset`：只重建当前 Agent 的 runtime 会话，不清空聊天记录，也不改变当前绑定
+- `/new` 不属于 Crewline 内置命令；如果底层 Agent provider 支持，Crewline 只会透传
+- 后续还会继续补充更多内置命令
+
+### 7. 会话管理与自动恢复
 
 每个对话维持一个 **Sticky Session**，Agent 记住上下文。会话断开？Crewline 会自动尝试恢复，恢复失败才重建——不会莫名其妙地丢失对话历史。
 

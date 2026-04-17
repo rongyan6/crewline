@@ -25,14 +25,19 @@ class FakeTelegramApi {
 class FakeRuntimeClient {
   constructor() {
     this.closed = 0;
+    this.ensureCalls = [];
     this.messages = [];
   }
   async ensureSession({ agentId, sessionName }) {
+    this.ensureCalls.push({ agentId, sessionName });
     return { backend: 'acpx', runtimeSessionName: sessionName ?? agentId, sessionKey: `${agentId}:${sessionName}` };
   }
   async runTurn({ runtimeHandle, messageText }) {
     this.messages.push(messageText);
     return { text: 'ok', runtimeHandle, exitCode: 0, stderr: '', stopReason: 'end_turn' };
+  }
+  async resumeSession({ runtimeHandle }) {
+    return { ok: true, runtimeHandle, metadata: {} };
   }
   async close() {
     this.closed += 1;
@@ -103,4 +108,77 @@ test('/new is forwarded to the agent and does not clear runtime binding state', 
       { role: 'assistant', text: 'ok' }
     ]
   );
+});
+
+test('/reset recreates the runtime session but keeps the bound agent and conversation log', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-reset-command-'));
+  const telegramApi = new FakeTelegramApi();
+  const runtimeClient = new FakeRuntimeClient();
+  const app = await bootstrap({ config: configFor(dir), telegramApi, runtimeClient });
+
+  await app.channelHost.dispatchRawEvent('telegram', {
+    update_id: 1,
+    message: {
+      message_id: 2,
+      date: Math.floor(Date.now() / 1000),
+      text: 'hello before reset',
+      chat: { id: 123 },
+      from: { id: 123, first_name: 'Json' }
+    }
+  });
+
+  const sessionFile = path.join(dir, 'bindings', 'telegram', 'dm', '123.json');
+  const beforeReset = JSON.parse(await fs.readFile(sessionFile, 'utf8'));
+
+  await app.channelHost.dispatchRawEvent('telegram', {
+    update_id: 2,
+    message: {
+      message_id: 3,
+      date: Math.floor(Date.now() / 1000),
+      text: '/reset',
+      chat: { id: 123 },
+      from: { id: 123, first_name: 'Json' }
+    }
+  });
+
+  const afterReset = JSON.parse(await fs.readFile(sessionFile, 'utf8'));
+  assert.notEqual(afterReset.sessionId, beforeReset.sessionId);
+  assert.equal(afterReset.state, 'active');
+  assert.equal(afterReset.instanceId, 'codex_cc');
+  assert.equal(runtimeClient.closed, 1);
+  assert.equal(runtimeClient.ensureCalls.length, 2);
+  assert.deepEqual(runtimeClient.messages, ['hello before reset']);
+  assert.match(telegramApi.sent.at(-1).text, /已重置当前 Agent 会话/);
+
+  await app.channelHost.dispatchRawEvent('telegram', {
+    update_id: 3,
+    message: {
+      message_id: 4,
+      date: Math.floor(Date.now() / 1000),
+      text: 'hello after reset',
+      chat: { id: 123 },
+      from: { id: 123, first_name: 'Json' }
+    }
+  });
+
+  const finalSession = JSON.parse(await fs.readFile(sessionFile, 'utf8'));
+  assert.equal(finalSession.sessionId, afterReset.sessionId);
+  assert.deepEqual(runtimeClient.messages, ['hello before reset', 'hello after reset']);
+
+  const conversationLogFile = path.join(dir, 'conversations', 'telegram', 'dm', '123.jsonl');
+  const entries = (await fs.readFile(conversationLogFile, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+
+  assert.deepEqual(entries.map((entry) => entry.role), [
+    'user',
+    'assistant',
+    'user',
+    'system',
+    'user',
+    'assistant'
+  ]);
+  assert.equal(entries[2].text, '/reset');
+  assert.match(entries[3].text, /聊天记录和绑定保持不变/);
 });
