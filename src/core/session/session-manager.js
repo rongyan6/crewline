@@ -274,7 +274,7 @@ export class SessionManager {
       runtimeHandle: session.runtimeHandle,
       cwd: routeDecision.resolvedCwd,
       approvalMode: routeDecision.approvalMode,
-      messageText: inboundMessage.text,
+      messageText: inboundMessage.rawMeta?.runtimeMessageText ?? inboundMessage.text,
       metadata: { conversationKey: routeDecision.conversationKey },
       onChunk: options.onChunk
     });

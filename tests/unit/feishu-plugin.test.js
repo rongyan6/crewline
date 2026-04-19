@@ -185,6 +185,112 @@ test('feishu plugin sends outbound text to chat_id', async () => {
   assert.equal(calls[0].data.receive_id, 'oc_3');
 });
 
+test('feishu plugin uploads outbound image attachments before sending image messages', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-send-image-'));
+  const imagePath = path.join(dir, 'chart.png');
+  await fs.writeFile(imagePath, 'image-bytes', 'utf8');
+  const messageCalls = [];
+  const imageUploads = [];
+  const plugin = new FeishuChannelPlugin({
+    config: feishuConfig(),
+    sdk: {
+      createClient: () => ({
+        request: async () => ({ data: { pingBotInfo: { botID: 'ou_bot' } } }),
+        im: {
+          image: {
+            create: async (payload) => {
+              imageUploads.push(payload);
+              return { data: { image_key: 'img_out_1' } };
+            }
+          },
+          file: {
+            create: async () => {
+              throw new Error('should not upload file');
+            }
+          },
+          message: {
+            create: async (payload) => {
+              messageCalls.push(payload);
+              return { data: { message_id: `om_img_${messageCalls.length}` } };
+            }
+          }
+        }
+      }),
+      createEventDispatcher: () => ({ register() {} }),
+      createWsClient: () => ({ start() {}, close() {} })
+    }
+  });
+  await plugin.start({ emitRawEvent: async () => {} });
+
+  const result = await plugin.send({
+    channel: 'feishu',
+    accountId: 'appid',
+    conversationRef: { channel: 'feishu', conversationId: 'oc_img_1', participantId: 'ou_3', scope: 'group' },
+    text: '图已生成',
+    attachments: [{ localPath: imagePath, kind: 'image' }]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(imageUploads.length, 1);
+  assert.equal(messageCalls.length, 2);
+  assert.equal(messageCalls[0].data.msg_type, 'text');
+  assert.equal(messageCalls[1].data.msg_type, 'image');
+  assert.equal(JSON.parse(messageCalls[1].data.content).image_key, 'img_out_1');
+});
+
+test('feishu plugin uploads outbound file attachments before sending file messages', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-send-file-'));
+  const filePath = path.join(dir, 'report.pdf');
+  await fs.writeFile(filePath, 'file-bytes', 'utf8');
+  const messageCalls = [];
+  const fileUploads = [];
+  const plugin = new FeishuChannelPlugin({
+    config: feishuConfig(),
+    sdk: {
+      createClient: () => ({
+        request: async () => ({ data: { pingBotInfo: { botID: 'ou_bot' } } }),
+        im: {
+          image: {
+            create: async () => {
+              throw new Error('should not upload image');
+            }
+          },
+          file: {
+            create: async (payload) => {
+              fileUploads.push(payload);
+              return { data: { file_key: 'file_out_1' } };
+            }
+          },
+          message: {
+            create: async (payload) => {
+              messageCalls.push(payload);
+              return { data: { message_id: `om_file_${messageCalls.length}` } };
+            }
+          }
+        }
+      }),
+      createEventDispatcher: () => ({ register() {} }),
+      createWsClient: () => ({ start() {}, close() {} })
+    }
+  });
+  await plugin.start({ emitRawEvent: async () => {} });
+
+  const result = await plugin.send({
+    channel: 'feishu',
+    accountId: 'appid',
+    conversationRef: { channel: 'feishu', conversationId: 'oc_file_1', participantId: 'ou_3', scope: 'group' },
+    text: '',
+    attachments: [{ localPath: filePath }]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(fileUploads.length, 1);
+  assert.equal(fileUploads[0].data.file_name, 'report.pdf');
+  assert.equal(messageCalls.length, 1);
+  assert.equal(messageCalls[0].data.msg_type, 'file');
+  assert.equal(JSON.parse(messageCalls[0].data.content).file_key, 'file_out_1');
+});
+
 test('feishu plugin streams with interactive card when account streaming is enabled', async () => {
   const calls = [];
   const plugin = new FeishuChannelPlugin({

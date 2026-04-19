@@ -6,6 +6,8 @@ import { conversationLogPath, runtimeBindingPath } from '../channel/host/convers
 import { TelegramNativePlugin } from '../channel/telegram/telegram-plugin.js';
 import { FeishuChannelPlugin } from '../channel/feishu/feishu-plugin.js';
 import { WechatChannelPlugin } from '../channel/wechat/wechat-plugin.js';
+import { resolveAttachmentRequest } from '../channel/host/attachment-requests.js';
+import { extractAttachmentsFromText } from '../channel/host/outbound-attachments.js';
 import { createOutboundMessage } from '../channel/host/outbound-message.js';
 import { startHeartbeat } from '../shared/utils/heartbeat.js';
 import { AsyncTextStream } from '../shared/utils/async-text-stream.js';
@@ -31,7 +33,7 @@ function hasKeys(value = {}) {
 
 function normalizeAttachments(attachments = []) {
   return attachments.map((attachment) => ({
-    kind: attachment.kind ?? 'file',
+    kind: attachment.disposition ?? attachment.kind ?? 'file',
     localPath: attachment.localPath ?? null,
     fileName: attachment.fileName ?? null,
     mimeType: attachment.mimeType ?? null,
@@ -46,6 +48,15 @@ function buildLogError({ code, message, layer } = {}) {
     message: message ?? null,
     layer: layer ?? null
   };
+}
+
+function hasVisibleText(text = '') {
+  return String(text ?? '').trim().length > 0;
+}
+
+function buildAttachmentPlaceholderText(text = '', attachments = []) {
+  if (hasVisibleText(text)) return text;
+  return attachments.length > 0 ? '已发送附件。' : '';
 }
 
 function resolveTelegramRequireMention(config, conversationRef) {
@@ -526,6 +537,57 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       }
     }
 
+    const attachmentRequest = !isSyntheticTrigger
+      ? await resolveAttachmentRequest(inboundMessage.text)
+      : { mode: 'none', attachments: [], runtimeMessageText: inboundMessage.text };
+    if (attachmentRequest.mode === 'direct' && attachmentRequest.attachments.length > 0) {
+      const sendResult = await channelHost.send(createOutboundMessage({
+        channel: inboundMessage.channel,
+        accountId: inboundMessage.accountId,
+        conversationRef: inboundMessage.conversationRef,
+        text: '',
+        attachments: attachmentRequest.attachments,
+        replyTo: buildInlineReplyTarget(inboundMessage),
+        meta: buildTelegramReplyMeta(inboundMessage)
+      }));
+      await appendConversationLog({
+        inboundMessage,
+        role: 'assistant',
+        text: buildAttachmentPlaceholderText('', attachmentRequest.attachments),
+        messageId: sendResult?.messageId ?? null,
+        attachments: normalizeAttachments(attachmentRequest.attachments),
+        error: null,
+        meta: {
+          reason: 'direct-attachment-send'
+        }
+      });
+      await metrics.increment('messages.outbound', 1, {
+        channel: inboundMessage.channel,
+        scope: inboundMessage.conversationRef.scope,
+        role: 'assistant'
+      });
+      await audit.record({
+        event: 'message.outbound',
+        channel: inboundMessage.channel,
+        scope: inboundMessage.conversationRef.scope,
+        conversationId: inboundMessage.conversationRef.conversationId,
+        outcome: 'ok',
+        reason: 'direct-attachment-send'
+      });
+      return { inboundMessage, directAttachmentSend: true, sendResult };
+    }
+
+    const runtimeInboundMessage = attachmentRequest.mode === 'agent'
+      ? {
+          ...inboundMessage,
+          rawMeta: {
+            ...inboundMessage.rawMeta,
+            runtimeMessageText: attachmentRequest.runtimeMessageText,
+            attachmentRequestMode: 'agent'
+          }
+        }
+      : inboundMessage;
+
     const sessionCommand = !isSyntheticTrigger ? parseSessionCommand(inboundMessage.text) : null;
     const routeDecision = router.route(inboundMessage);
     if (sessionCommand?.name === 'reset') {
@@ -735,7 +797,7 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
 
       const turnStartedAt = Date.now();
       const { session, result } = await sessionManager.runTurn({
-        inboundMessage,
+        inboundMessage: runtimeInboundMessage,
         routeDecision,
         onChunk: (chunk) => {
           firstChunkAt ??= Date.now();
@@ -769,7 +831,13 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
       stopTyping = null;
 
       const outboundStartedAt = Date.now();
-      if (result.ok && result.outputText) {
+      const extractedOutbound = result.ok
+        ? await extractAttachmentsFromText(result.outputText, { dataDir: config.runtime.dataDir })
+        : { text: '', attachments: [] };
+      const outboundText = extractedOutbound.text;
+      const outboundAttachments = extractedOutbound.attachments;
+
+      if (result.ok && (hasVisibleText(outboundText) || outboundAttachments.length > 0)) {
         if (liveStream) liveStream.close();
         let sendResult = null;
         if (liveSendPromise) {
@@ -781,20 +849,35 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
             });
             liveSendErrorLogged = true;
           }
-          if (inboundMessage.channel === 'feishu') {
+          const patchText = buildAttachmentPlaceholderText(outboundText, outboundAttachments);
+          if (inboundMessage.channel === 'feishu' && liveResult?.messageId && patchText) {
             sendResult = await channelHost.send(createOutboundMessage({
               channel: inboundMessage.channel,
               accountId: inboundMessage.accountId,
               conversationRef: inboundMessage.conversationRef,
-              text: result.outputText,
+              text: patchText,
               meta: {
-                patchMessageId: liveResult?.messageId ?? null,
+                patchMessageId: liveResult.messageId,
                 elapsedMs: Date.now() - streamStartedAt
               }
             }));
           } else if (inboundMessage.channel === 'telegram') {
-            if (liveResult?.messageId && liveResult.text?.trim() === result.outputText?.trim()) {
+            if (
+              liveResult?.messageId
+              && outboundAttachments.length === 0
+              && liveResult.text?.trim() === outboundText?.trim()
+            ) {
               sendResult = liveResult;
+            } else if (liveResult?.messageId && patchText) {
+              sendResult = await channelHost.send(createOutboundMessage({
+                channel: inboundMessage.channel,
+                accountId: inboundMessage.accountId,
+                conversationRef: inboundMessage.conversationRef,
+                text: patchText,
+                meta: buildTelegramReplyMeta(inboundMessage, {
+                  patchMessageId: liveResult.messageId
+                })
+              }));
             }
             // Otherwise leave sendResult null — fallback will send the full text as a new message.
             // This avoids truncated output when streaming edits or patches fail due to proxy issues.
@@ -802,23 +885,36 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
             sendResult = liveResult;
           }
         }
-        sendResult ??= await channelHost.send(createOutboundMessage({
-          channel: inboundMessage.channel,
-          accountId: inboundMessage.accountId,
-          conversationRef: inboundMessage.conversationRef,
-          text: result.outputText,
-          meta: inboundMessage.channel === 'feishu'
-            ? {
-                elapsedMs: Date.now() - streamStartedAt
-              }
-            : buildTelegramReplyMeta(inboundMessage)
-        }));
+        if (!sendResult && hasVisibleText(outboundText)) {
+          sendResult = await channelHost.send(createOutboundMessage({
+            channel: inboundMessage.channel,
+            accountId: inboundMessage.accountId,
+            conversationRef: inboundMessage.conversationRef,
+            text: outboundText,
+            meta: inboundMessage.channel === 'feishu'
+              ? {
+                  elapsedMs: Date.now() - streamStartedAt
+                }
+              : buildTelegramReplyMeta(inboundMessage)
+          }));
+        }
+        let attachmentSendResult = null;
+        if (outboundAttachments.length > 0) {
+          attachmentSendResult = await channelHost.send(createOutboundMessage({
+            channel: inboundMessage.channel,
+            accountId: inboundMessage.accountId,
+            conversationRef: inboundMessage.conversationRef,
+            text: '',
+            attachments: outboundAttachments,
+            meta: buildTelegramReplyMeta(inboundMessage)
+          }));
+        }
         await appendConversationLog({
           inboundMessage,
           role: 'assistant',
-          text: result.outputText,
-          messageId: sendResult?.messageId ?? null,
-          attachments: [],
+          text: outboundText,
+          messageId: sendResult?.messageId ?? attachmentSendResult?.messageId ?? null,
+          attachments: normalizeAttachments(outboundAttachments),
           error: null,
           meta: {
             sessionId: session.sessionId,
@@ -936,12 +1032,12 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
         sendMs: Date.now() - outboundStartedAt,
         totalMs: Date.now() - streamStartedAt
       });
-      if (result.ok && result.outputText) {
+      if (result.ok && (hasVisibleText(outboundText) || outboundAttachments.length > 0)) {
         logger.info('[crewline.outbound]', {
           conversationKey: routeDecision.conversationKey,
           sessionId: session.sessionId,
           instanceId: routeDecision.instanceId,
-          text: result.outputText
+          text: buildAttachmentPlaceholderText(outboundText, outboundAttachments)
         });
       }
       return { inboundMessage, routeDecision, session, result };

@@ -109,6 +109,33 @@ test('runPushCommand sends wechat message to explicit account and user id', asyn
   assert.equal(calls[0].text, 'done');
 });
 
+test('runPushCommand sends attachment-only telegram push when local image is provided', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-push-attachment-'));
+  const imagePath = path.join(dir, 'report.png');
+  await fs.writeFile(imagePath, 'image-bytes', 'utf8');
+  const calls = [];
+
+  const result = await runPushCommand({
+    channel: 'telegram',
+    argv: ['--chat-id', '-100888', '--image', imagePath],
+    loadRuntimeConfig: async () => ({ config: { runtime: { dataDir: '/tmp/crewline-test' }, channel: {} } }),
+    pluginFactories: {
+      telegram: () => ({
+        async send(outboundMessage) {
+          calls.push(outboundMessage);
+          return { ok: true, messageId: 'tg_attach_1' };
+        }
+      })
+    }
+  });
+
+  assert.equal(result.messageId, 'tg_attach_1');
+  assert.equal(calls[0].text, '');
+  assert.equal(calls[0].attachments.length, 1);
+  assert.equal(calls[0].attachments[0].localPath, imagePath);
+  assert.equal(calls[0].attachments[0].kind, 'image');
+});
+
 test('runPushCommand lists telegram dm group and topic targets from config and runtime', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-push-list-'));
   const runtimeDir = path.join(dir, 'conversations', 'telegram', '8641929320', 'dm');
@@ -230,4 +257,6 @@ test('formatPushHelp documents all supported channel forms', () => {
   assert.match(help, /crewline push feishu/);
   assert.match(help, /crewline push wechat/);
   assert.match(help, /--stdin/);
+  assert.match(help, /--file <path>/);
+  assert.match(help, /--image <path>/);
 });

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import fs from 'node:fs/promises';
 import { randomId } from '../../shared/utils/ids.js';
 
 function delay(ms) {
@@ -72,6 +73,48 @@ function httpsRequestOverSocket(socket, url, payload, timeoutMs) {
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(body),
         Connection: 'keep-alive'
+      },
+      agent: false
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        clearTimeout(timer);
+        try {
+          const parsed = JSON.parse(data);
+          resolve({ status: res.statusCode, data: parsed });
+        } catch {
+          reject(new Error(`Invalid JSON response: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+function httpsBufferRequestOverSocket(socket, url, body, headers, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error(`Request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const req = https.request({
+      socket,
+      hostname: url.hostname,
+      servername: url.hostname,
+      path: `${url.pathname}${url.search}`,
+      port: Number(url.port) || 443,
+      method: 'POST',
+      headers: {
+        Connection: 'keep-alive',
+        ...headers
       },
       agent: false
     }, (res) => {
@@ -192,6 +235,73 @@ async function fetchBuffer(url, { fetchImpl, timeoutSeconds }) {
   }
 }
 
+function buildMultipartBuffer({ fields = {}, fileField, fileName, contentType, fileBuffer }) {
+  const boundary = `----crewline-${randomId('tg')}`;
+  const chunks = [];
+
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue;
+    const serialized = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    chunks.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${serialized}\r\n`
+    ));
+  }
+
+  const safeFileName = String(fileName ?? 'file.bin').replace(/"/g, '\\"');
+  chunks.push(Buffer.from(
+    `--${boundary}\r\n`
+    + `Content-Disposition: form-data; name="${fileField}"; filename="${safeFileName}"\r\n`
+    + `Content-Type: ${contentType || 'application/octet-stream'}\r\n\r\n`
+  ));
+  chunks.push(fileBuffer);
+  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  const body = Buffer.concat(chunks);
+  return {
+    body,
+    headers: {
+      'content-type': `multipart/form-data; boundary=${boundary}`,
+      'content-length': String(body.length)
+    }
+  };
+}
+
+async function proxyFetchMultipart(url, body, headers, { timeoutSeconds, proxy }) {
+  const target = new URL(url);
+  const socket = await connectThroughProxy(proxy, target.hostname, Number(target.port) || 443, {
+    timeoutMs: timeoutSeconds * 1000
+  });
+  try {
+    const { status, data } = await httpsBufferRequestOverSocket(socket, target, body, headers, timeoutSeconds * 1000);
+    if (status < 200 || status >= 300 || data.ok === false) {
+      throw new Error(data.description ?? `Telegram API error: ${status}`);
+    }
+    return data.result;
+  } finally {
+    socket.destroy();
+  }
+}
+
+async function fetchMultipartJson(url, body, headers, { fetchImpl, timeoutSeconds }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers,
+      body,
+      signal: controller.signal
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.description ?? `Telegram API error: ${response.status}`);
+    }
+    return data.result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class TelegramBotApi {
   constructor({ token, baseUrl = 'https://api.telegram.org', timeoutSeconds = 30, proxy = null, fetchImpl = globalThis.fetch }) {
     this.token = token;
@@ -222,6 +332,28 @@ export class TelegramBotApi {
       });
     }
     return fetchJson(url, normalized, { fetchImpl: this.fetchImpl, timeoutSeconds: timeout });
+  }
+
+  async callMultipart(method, { fields = {}, fileField, fileName, contentType, fileBuffer }, { timeoutSeconds } = {}) {
+    const url = this.methodUrl(method);
+    const timeout = timeoutSeconds ?? this.timeoutSeconds;
+    const { body, headers } = buildMultipartBuffer({
+      fields,
+      fileField,
+      fileName,
+      contentType,
+      fileBuffer
+    });
+    if (this.proxy) {
+      return proxyFetchMultipart(url, body, headers, {
+        timeoutSeconds: timeout,
+        proxy: this.proxy
+      });
+    }
+    return fetchMultipartJson(url, body, headers, {
+      fetchImpl: this.fetchImpl,
+      timeoutSeconds: timeout
+    });
   }
 
   async getMe({ timeoutSeconds = this.timeoutSeconds } = {}) {
@@ -261,6 +393,38 @@ export class TelegramBotApi {
       text,
       reply_parameters: replyTo ? { message_id: replyTo } : undefined,
       ...meta
+    });
+  }
+
+  async sendPhoto({ chatId, messageThreadId, filePath, fileName, mimeType, caption, replyTo, meta = {} }) {
+    return this.callMultipart('sendPhoto', {
+      fields: {
+        chat_id: chatId,
+        message_thread_id: messageThreadId,
+        caption,
+        reply_parameters: replyTo ? { message_id: replyTo } : undefined,
+        ...meta
+      },
+      fileField: 'photo',
+      fileName,
+      contentType: mimeType,
+      fileBuffer: await fs.readFile(filePath)
+    });
+  }
+
+  async sendDocument({ chatId, messageThreadId, filePath, fileName, mimeType, caption, replyTo, meta = {} }) {
+    return this.callMultipart('sendDocument', {
+      fields: {
+        chat_id: chatId,
+        message_thread_id: messageThreadId,
+        caption,
+        reply_parameters: replyTo ? { message_id: replyTo } : undefined,
+        ...meta
+      },
+      fileField: 'document',
+      fileName,
+      contentType: mimeType,
+      fileBuffer: await fs.readFile(filePath)
     });
   }
 

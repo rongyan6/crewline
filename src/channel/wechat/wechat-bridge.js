@@ -709,17 +709,26 @@ export async function sendWechatMessage({
   });
   const api = createWechatApi({ account, bridgeConfig, fetchImpl });
   const mediaPath = outboundMessage.meta?.wechat?.mediaPath ?? outboundMessage.meta?.wechat?.mediaUrl ?? outboundMessage.meta?.mediaPath ?? outboundMessage.meta?.mediaUrl;
-  if (mediaPath) {
-    return await sendWechatMediaFile({
-      api,
-      cdnBaseUrl: account.cdnBaseUrl ?? bridgeConfig.cdnBaseUrl,
-      to,
-      text: outboundMessage.text ?? '',
-      contextToken,
-      filePath: mediaPath,
-      allowRemoteUrl: config.allowRemoteMediaUrl === true,
-      fetchImpl
-    });
+  const outboundAttachments = (outboundMessage.attachments?.length ?? 0) > 0
+    ? outboundMessage.attachments
+    : (mediaPath ? [{ localPath: mediaPath }] : []);
+  if (outboundAttachments.length > 0) {
+    let firstResult = null;
+    for (let index = 0; index < outboundAttachments.length; index += 1) {
+      const attachment = outboundAttachments[index];
+      const result = await sendWechatMediaFile({
+        api,
+        cdnBaseUrl: account.cdnBaseUrl ?? bridgeConfig.cdnBaseUrl,
+        to,
+        text: index === 0 ? (outboundMessage.text ?? '') : '',
+        contextToken,
+        filePath: attachment.localPath,
+        allowRemoteUrl: config.allowRemoteMediaUrl === true,
+        fetchImpl
+      });
+      firstResult ??= result;
+    }
+    return firstResult;
   }
   const clientId = `crewline-wechat-${crypto.randomUUID()}`;
   await apiPostFetch({

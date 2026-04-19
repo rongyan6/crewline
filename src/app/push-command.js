@@ -76,6 +76,18 @@ function resolveTextOption(options) {
   return firstDefinedOption(options, ['text', 'message']);
 }
 
+function resolveAttachmentOption(options) {
+  const filePath = firstDefinedOption(options, ['file', 'media', 'media-path']);
+  const imagePath = firstDefinedOption(options, ['image']);
+  if (filePath !== undefined && imagePath !== undefined) {
+    throw new Error('Use either `--file` or `--image`, not both.');
+  }
+  return {
+    path: imagePath ?? filePath,
+    kind: imagePath !== undefined ? 'image' : undefined
+  };
+}
+
 function resolveTelegramScope(chatId, topicId) {
   if (topicId) return 'topic';
   return String(chatId).startsWith('-') ? 'group' : 'dm';
@@ -98,6 +110,7 @@ export function parsePushCommand({ channel, argv = [] } = {}) {
   const accountId = firstDefinedOption(options, ['account', 'account-id']);
   const format = firstDefinedOption(options, ['format']) ?? 'plain';
   const listMode = hasListFlag(options);
+  const attachment = resolveAttachmentOption(options);
 
   switch (normalizedChannel) {
     case 'telegram': {
@@ -120,6 +133,7 @@ export function parsePushCommand({ channel, argv = [] } = {}) {
         format,
         useStdin: options.stdin === true,
         text: resolveTextOption(options),
+        attachment,
         conversationRef: {
           channel: 'telegram',
           accountId: accountId ? String(accountId) : undefined,
@@ -149,6 +163,7 @@ export function parsePushCommand({ channel, argv = [] } = {}) {
         format,
         useStdin: options.stdin === true,
         text: resolveTextOption(options),
+        attachment,
         conversationRef: {
           channel: 'feishu',
           accountId: accountId ? String(accountId) : undefined,
@@ -181,6 +196,7 @@ export function parsePushCommand({ channel, argv = [] } = {}) {
         format,
         useStdin: options.stdin === true,
         text: resolveTextOption(options),
+        attachment,
         conversationRef: {
           channel: 'wechat',
           accountId: resolvedAccountId,
@@ -200,10 +216,24 @@ function resolveOutboundText(spec, stdinText) {
     throw new Error('Use either `--text` or `--stdin`, not both.');
   }
   const text = spec.useStdin ? stdinText : spec.text;
-  if (text === undefined || text === null || String(text).length === 0) {
-    throw new Error('Push message text is required. Use `--text` or `--stdin`.');
+  if ((text === undefined || text === null || String(text).length === 0) && !spec.attachment?.path) {
+    throw new Error('Push message requires text or a media file. Use `--text`, `--stdin`, `--file`, or `--image`.');
   }
-  return String(text);
+  return text === undefined || text === null ? '' : String(text);
+}
+
+async function resolveOutboundAttachments(spec) {
+  const attachmentPath = spec.attachment?.path;
+  if (!attachmentPath) return [];
+  const resolvedPath = path.resolve(String(attachmentPath));
+  const stat = await fs.stat(resolvedPath).catch(() => null);
+  if (!stat?.isFile()) {
+    throw new Error(`Push attachment not found: ${resolvedPath}`);
+  }
+  return [{
+    kind: spec.attachment.kind,
+    localPath: resolvedPath
+  }];
 }
 
 function createPluginFactories() {
@@ -494,17 +524,18 @@ export function formatPushHelp() {
     '  crewline push telegram --list [--account <id>]',
     '  crewline push feishu --list [--account <id>]',
     '  crewline push wechat --list [--account <id>]',
-    '  crewline push telegram --chat-id <id> [--topic-id <id>] [--account <id>] (--text <message> | --stdin)',
-    '  crewline push feishu --chat-id <id> [--account <id>] (--text <message> | --stdin)',
-    '  crewline push wechat --account <id> --user-id <id> (--text <message> | --stdin)',
+    '  crewline push telegram --chat-id <id> [--topic-id <id>] [--account <id>] [--text <message> | --stdin] [--file <path> | --image <path>]',
+    '  crewline push feishu --chat-id <id> [--account <id>] [--text <message> | --stdin] [--file <path> | --image <path>]',
+    '  crewline push wechat --account <id> --user-id <id> [--text <message> | --stdin] [--file <path> | --image <path>]',
     '',
     'Examples:',
     '  crewline push telegram --list',
     '  crewline push feishu --list --account your_app_id',
     '  crewline push telegram --chat-id -1001234567890 --text "deploy finished"',
     '  crewline push telegram --chat-id -1001234567890 --topic-id 42 --stdin',
+    '  crewline push telegram --chat-id -1001234567890 --image ./report.png',
     '  crewline push feishu --account your_app_id --chat-id oc_xxx --text "build passed"',
-    '  crewline push wechat --account bot@im.bot --user-id wxid_xxx --text "agent finished"'
+    '  crewline push wechat --account bot@im.bot --user-id wxid_xxx --file ./report.pdf'
   ].join('\n');
 }
 
@@ -532,6 +563,7 @@ export async function runPushCommand({
   }
   const stdinText = spec.useStdin ? await readTextFromStdin(stdin) : undefined;
   const text = resolveOutboundText(spec, stdinText);
+  const attachments = await resolveOutboundAttachments(spec);
   const createPlugin = pluginFactories[spec.channel];
   if (typeof createPlugin !== 'function') {
     throw new Error(`Push channel is not supported: ${spec.channel}`);
@@ -547,6 +579,7 @@ export async function runPushCommand({
     accountId: spec.accountId,
     conversationRef: spec.conversationRef,
     text,
+    attachments,
     format: spec.format
   });
   const result = await plugin.send(outboundMessage);

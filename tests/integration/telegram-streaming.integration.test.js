@@ -9,6 +9,8 @@ class FakeTelegramApi {
   constructor() {
     this.chatActions = [];
     this.sent = [];
+    this.photos = [];
+    this.documents = [];
     this.streams = [];
     this.edits = [];
     this.events = [];
@@ -25,6 +27,14 @@ class FakeTelegramApi {
   async sendMessage(payload) {
     this.sent.push(payload);
     return { message_id: this.sent.length };
+  }
+  async sendPhoto(payload) {
+    this.photos.push(payload);
+    return { message_id: this.sent.length + this.photos.length + this.documents.length };
+  }
+  async sendDocument(payload) {
+    this.documents.push(payload);
+    return { message_id: this.sent.length + this.photos.length + this.documents.length };
   }
   async editMessageText(payload) {
     this.edits.push(payload);
@@ -139,6 +149,38 @@ test('bootstrap sends final complete telegram reply even when runtime emits chun
   assert.equal(telegramApi.sent.length > 0, true);
   assert.equal(telegramApi.sent.at(-1).text, finalText);
   assert.equal(telegramApi.edits.length, 0);
+});
+
+test('bootstrap converts runtime local_path directives into outbound telegram attachments', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-telegram-outbound-attachment-'));
+  const imagePath = path.join(dir, 'result.png');
+  await fs.writeFile(imagePath, 'image-bytes', 'utf8');
+  const telegramApi = new FakeTelegramApi();
+  const app = await bootstrap({
+    config: {
+      ...configFor(dir),
+      runtime: { ...configFor(dir).runtime, telegramTypingStartDelayMs: 0, telegramTypingIntervalMs: 50 }
+    },
+    telegramApi,
+    runtimeClient: new FakeRuntimeClient({
+      text: `图已生成\nlocal_path: ${imagePath}`
+    })
+  });
+
+  await app.channelHost.dispatchRawEvent('telegram', {
+    update_id: 200,
+    message: {
+      message_id: 201,
+      date: Math.floor(Date.now() / 1000),
+      text: '发图给我',
+      chat: { id: 123 },
+      from: { id: 123, first_name: 'Json' }
+    }
+  });
+
+  assert.equal(telegramApi.sent.at(-1).text, '图已生成');
+  assert.equal(telegramApi.photos.length, 1);
+  assert.equal(telegramApi.photos[0].filePath, imagePath);
 });
 
 test('bootstrap fires initial typing concurrently with turn', async () => {

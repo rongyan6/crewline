@@ -63,12 +63,28 @@ function feishuConfigFor(dir) {
 function createFeishuSdkSpy() {
   const sent = [];
   const reactions = [];
+  const imageUploads = [];
+  const fileUploads = [];
   return {
     sent,
     reactions,
+    imageUploads,
+    fileUploads,
     createClient: () => ({
       request: async () => ({ data: { pingBotInfo: { botID: 'ou_bot' } } }),
       im: {
+        image: {
+          create: async (payload) => {
+            imageUploads.push(payload);
+            return { data: { image_key: `img_${imageUploads.length}` } };
+          }
+        },
+        file: {
+          create: async (payload) => {
+            fileUploads.push(payload);
+            return { data: { file_key: `file_${fileUploads.length}` } };
+          }
+        },
         messageResource: {
           get: async () => Buffer.from('feishu-bytes')
         },
@@ -137,6 +153,121 @@ test('bootstrap handles inbound feishu text and sends outbound reply', async () 
   assert.equal(runtimeClient.calls[0], 'hello feishu');
   assert.equal(sdk.sent.length > 0, true);
   assert.equal(readFeishuContent(sdk.sent.at(-1)), '已收到飞书消息');
+});
+
+test('bootstrap converts runtime local_path directives into outbound feishu attachments', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-outbound-attachment-'));
+  const imagePath = path.join(dir, 'chart.png');
+  await fs.writeFile(imagePath, 'image-bytes', 'utf8');
+  const sdk = createFeishuSdkSpy();
+  const runtimeClient = new FakeRuntimeClient({ text: `图已生成\nlocal_path: ${imagePath}` });
+  const app = await bootstrap({
+    config: feishuConfigFor(dir),
+    runtimeClient,
+    feishuSdk: sdk
+  });
+
+  await app.channelHost.dispatchRawEvent('feishu', {
+    accountId: 'appid',
+    message: {
+      message_id: 'om_attach_1',
+      chat_id: 'oc_attach_1',
+      chat_type: 'p2p',
+      message_type: 'text',
+      content: JSON.stringify({ text: 'send image' }),
+      create_time: String(Date.now())
+    },
+    sender: {
+      sender_id: { open_id: 'ou_123', user_id: 'u_123', union_id: 'un_123' }
+    }
+  });
+
+  assert.equal(readFeishuContent(sdk.sent[0]), '图已生成');
+  assert.equal(sdk.imageUploads.length, 1);
+  assert.equal(sdk.sent[1].data.msg_type, 'image');
+  assert.equal(JSON.parse(sdk.sent[1].data.content).image_key, 'img_1');
+});
+
+test('bootstrap intercepts exact local file send requests before runtime execution', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-direct-send-'));
+  const filePath = path.join(dir, 'README.md');
+  await fs.writeFile(filePath, '# hi', 'utf8');
+  const sdk = createFeishuSdkSpy();
+  const runtimeClient = new FakeRuntimeClient({ text: 'should not run' });
+  const app = await bootstrap({
+    config: feishuConfigFor(dir),
+    runtimeClient,
+    feishuSdk: sdk
+  });
+
+  await app.channelHost.dispatchRawEvent('feishu', {
+    accountId: 'appid',
+    message: {
+      message_id: 'om_direct_1',
+      chat_id: 'oc_direct_1',
+      chat_type: 'p2p',
+      message_type: 'text',
+      content: JSON.stringify({ text: `把文件${filePath}发给我` }),
+      create_time: String(Date.now())
+    },
+    sender: {
+      sender_id: { open_id: 'ou_123', user_id: 'u_123', union_id: 'un_123' }
+    }
+  });
+
+  assert.equal(runtimeClient.calls.length, 0);
+  assert.equal(sdk.fileUploads.length, 1);
+  assert.equal(JSON.parse(sdk.sent[0].data.content).file_key, 'file_1');
+});
+
+test('bootstrap lets agent resolve fuzzy attachment requests through structured attachment action blocks', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-feishu-agent-send-'));
+  const filePath = path.join(dir, 'README.md');
+  await fs.writeFile(filePath, '# hi', 'utf8');
+  const sdk = createFeishuSdkSpy();
+  let observedMessageText = '';
+  const runtimeClient = new FakeRuntimeClient();
+  runtimeClient.runTurn = async ({ runtimeHandle, messageText }) => {
+    observedMessageText = messageText;
+    return {
+      text: [
+        'README 发你了。',
+        '```crewline-send-attachments',
+        JSON.stringify({ attachments: [{ path: filePath }] }),
+        '```'
+      ].join('\n'),
+      runtimeHandle,
+      exitCode: 0,
+      stderr: '',
+      stopReason: 'end_turn'
+    };
+  };
+  const app = await bootstrap({
+    config: feishuConfigFor(dir),
+    runtimeClient,
+    feishuSdk: sdk
+  });
+
+  await app.channelHost.dispatchRawEvent('feishu', {
+    accountId: 'appid',
+    message: {
+      message_id: 'om_agent_1',
+      chat_id: 'oc_agent_1',
+      chat_type: 'p2p',
+      message_type: 'text',
+      content: JSON.stringify({ text: '把 README 发给我' }),
+      create_time: String(Date.now())
+    },
+    sender: {
+      sender_id: { open_id: 'ou_123', user_id: 'u_123', union_id: 'un_123' }
+    }
+  });
+
+  assert.match(observedMessageText, /crewline-send-attachments/);
+  assert.match(observedMessageText, /不要粘贴文件内容/);
+  assert.equal(sdk.fileUploads.length, 1);
+  assert.equal(readFeishuContent(sdk.sent[0]), 'README 发你了。');
+  assert.equal(JSON.parse(sdk.sent[1].data.content).file_key, 'file_1');
 });
 
 test('bootstrap sends local first-session greeting for simple feishu hello', async () => {

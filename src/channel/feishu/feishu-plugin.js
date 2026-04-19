@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { createInboundMessage } from '../host/inbound-message.js';
 import { createOutboundMessage } from '../host/outbound-message.js';
 import { CrewlineError } from '../../shared/errors/error-envelope.js';
@@ -118,6 +120,40 @@ function buildInboundFromEvent({ event, accountState, timestamp, text, localRepl
       }
     })
   ];
+}
+
+function extractFeishuUploadKey(response, key) {
+  return response?.data?.[key] ?? response?.[key] ?? null;
+}
+
+async function sendFeishuRawMessage({
+  client,
+  target,
+  replyToMessageId,
+  msgType,
+  content
+}) {
+  const response = replyToMessageId
+    ? await client.im.message.reply({
+        path: { message_id: replyToMessageId },
+        data: {
+          msg_type: msgType,
+          content
+        }
+      })
+    : await client.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: target,
+          msg_type: msgType,
+          content
+        }
+      });
+  return {
+    ok: true,
+    channel: 'feishu',
+    messageId: response?.data?.message_id ?? ''
+  };
 }
 
 export class FeishuChannelPlugin {
@@ -427,35 +463,64 @@ export class FeishuChannelPlugin {
         });
       }
 
-      const text = buildStaticFeishuReply(outboundMessage.text, { footer, elapsedMs });
-      if (outboundMessage.replyTo) {
-        const response = await accountState.client.im.message.reply({
-          path: { message_id: outboundMessage.replyTo },
-          data: {
-            msg_type: 'text',
-            content: JSON.stringify({ text })
-          }
+      let firstResult = null;
+      if (outboundMessage.text) {
+        const text = buildStaticFeishuReply(outboundMessage.text, { footer, elapsedMs });
+        firstResult = await sendFeishuRawMessage({
+          client: accountState.client,
+          target: outboundMessage.conversationRef.conversationId,
+          replyToMessageId: outboundMessage.replyTo,
+          msgType: 'text',
+          content: JSON.stringify({ text })
         });
-        return {
-          ok: true,
-          channel: 'feishu',
-          messageId: response?.data?.message_id ?? ''
-        };
       }
 
-      const response = await accountState.client.im.message.create({
-        params: { receive_id_type: 'chat_id' },
-        data: {
-          receive_id: outboundMessage.conversationRef.conversationId,
-          msg_type: 'text',
-          content: JSON.stringify({ text })
+      for (const attachment of outboundMessage.attachments ?? []) {
+        const isImage = attachment.disposition === 'image' || attachment.kind === 'image';
+        if (isImage) {
+          const uploadResponse = await accountState.client.im.image.create({
+            data: {
+              image_type: 'message',
+              image: await fs.readFile(attachment.localPath)
+            }
+          });
+          const imageKey = extractFeishuUploadKey(uploadResponse, 'image_key');
+          if (!imageKey) {
+            throw new Error('Feishu image upload succeeded without image_key');
+          }
+          const result = await sendFeishuRawMessage({
+            client: accountState.client,
+            target: outboundMessage.conversationRef.conversationId,
+            replyToMessageId: firstResult ? undefined : outboundMessage.replyTo,
+            msgType: 'image',
+            content: JSON.stringify({ image_key: imageKey })
+          });
+          firstResult ??= result;
+          continue;
         }
-      });
-      return {
-        ok: true,
-        channel: 'feishu',
-        messageId: response?.data?.message_id ?? ''
-      };
+
+        const uploadResponse = await accountState.client.im.file.create({
+          data: {
+            file_type: 'stream',
+            file_name: attachment.fileName ?? path.basename(attachment.localPath ?? 'attachment'),
+            file: await fs.readFile(attachment.localPath)
+          }
+        });
+        const fileKey = extractFeishuUploadKey(uploadResponse, 'file_key');
+        if (!fileKey) {
+          throw new Error('Feishu file upload succeeded without file_key');
+        }
+        const result = await sendFeishuRawMessage({
+          client: accountState.client,
+          target: outboundMessage.conversationRef.conversationId,
+          replyToMessageId: firstResult ? undefined : outboundMessage.replyTo,
+          msgType: 'file',
+          content: JSON.stringify({ file_key: fileKey })
+        });
+        firstResult ??= result;
+      }
+
+      return firstResult;
     } catch (error) {
       throw new CrewlineError({
         code: ErrorCodes.CHANNEL_SEND_FAILED,

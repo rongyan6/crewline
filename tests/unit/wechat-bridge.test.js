@@ -205,6 +205,78 @@ test('sendWechatMessage posts directly to ilink sendmessage with stored token/co
   assert.equal(body.msg.item_list[0].text_item.text, 'reply text');
 });
 
+test('sendWechatMessage routes unified attachments through outbound media upload flow', async () => {
+  const dataDir = await import('node:fs/promises').then((fs) =>
+    fs.mkdtemp(path.join(os.tmpdir(), 'crewline-wechat-send-attachment-'))
+  );
+  const bridgeConfig = resolveWechatBridgeConfig({}, { dataDir });
+  saveWechatAccount({
+    bridgeConfig,
+    accountId: 'wxbot@im.bot',
+    account: {
+      token: 'bot-token',
+      baseUrl: 'https://api-wechat.example',
+      userId: 'wxid_owner'
+    }
+  });
+  normalizeWechatInboundEvent({
+    accountId: 'wxbot@im.bot',
+    bridgeConfig,
+    message: {
+      from_user_id: 'wxid_alice',
+      context_token: 'ctx-3',
+      item_list: [{ type: 1, text_item: { text: 'hi' } }]
+    }
+  });
+  const imagePath = path.join(dataDir, 'report.png');
+  await import('node:fs/promises').then((fs) => fs.writeFile(imagePath, 'image-bytes', 'utf8'));
+
+  const sendBodies = [];
+  const result = await sendWechatMessage({
+    config: {},
+    dataDir,
+    outboundMessage: {
+      accountId: 'wxbot@im.bot',
+      conversationRef: { participantId: 'wxid_alice', conversationId: 'wxid_alice' },
+      text: 'reply with image',
+      attachments: [{ localPath: imagePath, kind: 'image' }]
+    },
+    fetchImpl: async (url, init) => {
+      if (String(url).includes('/getuploadurl')) {
+        return createJsonResponse({ upload_param: 'upload-token' });
+      }
+      if (String(url).startsWith('https://novac2c.cdn.weixin.qq.com/c2c/upload')) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          headers: {
+            get(name) {
+              return name.toLowerCase() === 'x-encrypted-param' ? 'download-token' : null;
+            }
+          },
+          async text() {
+            return '';
+          }
+        };
+      }
+      if (String(url).includes('/sendmessage')) {
+        const parsed = JSON.parse(init.body);
+        sendBodies.push(parsed);
+        return createJsonResponse({});
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(sendBodies.length, 1);
+  assert.equal(sendBodies[0].msg.to_user_id, 'wxid_alice');
+  assert.equal(sendBodies[0].msg.context_token, 'ctx-3');
+  assert.equal(sendBodies[0].msg.item_list[0].text_item.text, 'reply with image');
+  assert.equal(sendBodies[0].msg.item_list[1].type, 2);
+});
+
 test('getWechatTypingConfig falls back to stored context token for the same user', async () => {
   const dataDir = await import('node:fs/promises').then((fs) =>
     fs.mkdtemp(path.join(os.tmpdir(), 'crewline-wechat-typing-config-'))
