@@ -262,7 +262,8 @@ export async function bootstrap({ config, telegramApi, runtimeClient, feishuSdk 
   const router = new ConversationRouter({ bindings: config.bindings, agentRegistry });
   const runtimeGateway = new AcpRuntimeGateway({
     client: runtimeClient ?? new AcpxClient({
-      turnTimeoutMs: config.runtime?.acpxTurnTimeoutMs
+      turnTimeoutMs: config.runtime?.acpxTurnTimeoutMs,
+      queueTtlSeconds: config.runtime?.acpxQueueTtlSeconds
     })
   });
   const stateStore = new StateStore({

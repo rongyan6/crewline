@@ -46,6 +46,7 @@ function defaultSystemConfig() {
       dataDir: '~/.crewline',
       timezone: 'Asia/Shanghai',
       acpxTurnTimeoutMs: 600000,
+      acpxQueueTtlSeconds: 300,
       gracefulShutdownMs: 10000,
       hotReload: false
     },

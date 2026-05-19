@@ -1,6 +1,6 @@
 {
   "name": "crewline",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "A gateway where humans and local AI agents collaborate.",
   "type": "module",
   "homepage": "https://github.com/rongyan6/crewline#readme",
@@ -49,17 +49,19 @@
     "crewline": "dist/crewline.js"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.26.0",
-    "@larksuiteoapi/node-sdk": "^1.60.0",
+    "@agentclientprotocol/claude-agent-acp": "^0.36.1",
+    "@larksuiteoapi/node-sdk": "^1.64.0",
     "@zed-industries/codex-acp": "^0.11.1",
     "acpx": "^0.5.2",
     "qrcode-terminal": "0.12.0"
   },
   "overrides": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.101",
-    "axios": "1.15.0",
+    "axios": "1.16.1",
     "follow-redirects": "1.16.0",
-    "hono": "4.12.14",
-    "protobufjs": "7.5.5"
+    "hono": "4.12.19",
+    "protobufjs": "8.4.0",
+    "ws": "8.20.1",
+    "fast-uri": "3.1.2",
+    "ip-address": "10.2.0"
   }
 }

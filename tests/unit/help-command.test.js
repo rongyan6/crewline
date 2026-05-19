@@ -13,6 +13,7 @@ test('formatHelp lists init help and channel doctor commands', () => {
   assert.match(help, /doctor wechat/);
   assert.match(help, /push <channel>/);
   assert.match(help, /trigger <channel>/);
+  assert.match(help, /session <list\|reset>/);
   assert.match(help, /uses launchd and installs the agent automatically/);
   assert.match(help, /direct mode is reserved for local development/);
   assert.match(help, /\/Users\/tester\/\.crewline/);

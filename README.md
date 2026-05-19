@@ -66,7 +66,8 @@ Edit `~/.crewline/crewline.json` and make sure the agent instance points to the 
 ```json
 {
   "runtime": {
-    "dataDir": "~/.crewline"
+    "dataDir": "~/.crewline",
+    "acpxQueueTtlSeconds": 300
   },
   "agents": {
     "providers": {
@@ -179,7 +180,7 @@ crewline stop
 crewline restart
 ```
 
-`crewline stop` and `crewline restart` also clean up leftover Crewline service processes on the local machine, so you do not keep stale runtimes around after a restart.
+`crewline stop` and `crewline restart` also clean up leftover Crewline service processes on the local machine, so you do not keep stale gateway instances around after a restart. ACPX queue owners use `runtime.acpxQueueTtlSeconds` and expire after 300 seconds by default; set it to `0` only when you intentionally want ACPX queue owners to stay alive indefinitely.
 
 Use these commands when you want to pre-install, refresh, or remove the macOS `launchd` agent explicitly:
 
@@ -231,6 +232,23 @@ Notes:
 - it then injects the same prefixed text into the bound Agent conversation
 - `trigger --list` reuses the same known target discovery as `push --list`
 - Feishu direct-message triggers can auto-resolve the participant from runtime history when the `chat-id` was seen before; otherwise pass `--participant-id`
+
+Inspect or reset stored Agent runtime sessions from the local CLI:
+
+```bash
+crewline session list telegram --account your_bot_id
+crewline session list feishu --account your_app_id
+crewline session reset telegram --chat-id -1001234567890 --topic-id 42
+crewline session reset feishu --account your_app_id --chat-id oc_xxx --scope dm --participant-id ou_xxx
+crewline session reset wechat --account bot@im.bot --user-id wxid_xxx
+```
+
+Notes:
+
+- `session list` uses the same known target discovery as `push --list`
+- `session reset` closes the known Agent runtime session when possible, removes the stored binding, and lets the next inbound message create a fresh runtime session inside the running service
+- this is useful after changing local API environment variables, provider models, or ACPX/Codex/Claude credentials
+- Feishu direct-message resets can auto-resolve the participant from runtime history when the `chat-id` was seen before; otherwise pass `--participant-id`
 
 ## 7. Built-in Conversation Commands
 

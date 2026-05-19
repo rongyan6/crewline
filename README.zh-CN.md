@@ -66,7 +66,8 @@ crewline help
 ```json
 {
   "runtime": {
-    "dataDir": "~/.crewline"
+    "dataDir": "~/.crewline",
+    "acpxQueueTtlSeconds": 300
   },
   "agents": {
     "providers": {
@@ -178,7 +179,7 @@ crewline stop
 crewline restart
 ```
 
-`crewline stop` 和 `crewline restart` 还会顺带清理本机残留的 Crewline 服务进程，避免重启后继续有旧实例占着连接。
+`crewline stop` 和 `crewline restart` 还会顺带清理本机残留的 Crewline 服务进程，避免重启后继续有旧 gateway 实例占着连接。ACPX queue owner 由 `runtime.acpxQueueTtlSeconds` 控制，默认 300 秒后过期；只有在你明确希望 ACPX queue owner 长驻时才建议设为 `0`。
 
 如果你想显式预装、重装或移除 macOS 的 `launchd` 服务：
 
@@ -236,6 +237,23 @@ crewline trigger wechat --account bot@im.bot --user-id wxid_xxx --text "定时�
 - 然后再把同样的前缀文本注入到对应 Agent 会话里
 - `trigger --list` 复用 `push --list` 的目标发现逻辑
 - 飞书私聊 trigger 如果这个 `chat-id` 在运行期历史里已经出现过，可以自动回填参与者；否则请显式传 `--participant-id`
+
+如果你想在本机查看或重建某个已存的 Agent runtime 会话，可以直接调用：
+
+```bash
+crewline session list telegram --account your_bot_id
+crewline session list feishu --account your_app_id
+crewline session reset telegram --chat-id -1001234567890 --topic-id 42
+crewline session reset feishu --account your_app_id --chat-id oc_xxx --scope dm --participant-id ou_xxx
+crewline session reset wechat --account bot@im.bot --user-id wxid_xxx
+```
+
+说明：
+
+- `session list` 复用 `push --list` 的目标发现逻辑
+- `session reset` 会尽量关闭当前已知的 Agent runtime session，删除本地 runtime binding，然后让下一条入站消息在正在运行的服务进程里重新创建新会话
+- 修改本地第三方 API 环境变量、provider model、ACPX/Codex/Claude 凭据后，可以用它清掉旧会话
+- 飞书私聊 reset 如果这个 `chat-id` 在运行期历史里已经出现过，可以自动回填参与者；否则请显式传 `--participant-id`
 
 ## 7. 会话内置命令
 

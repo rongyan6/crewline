@@ -7,6 +7,7 @@ import { createRuntimeHandle } from './runtime-handle.js';
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ACPX_COMMAND_TIMEOUT_MS = 120_000;
 const DEFAULT_ACPX_TURN_TIMEOUT_MS = 600_000;
+const DEFAULT_ACPX_QUEUE_TTL_SECONDS = 300;
 
 function findCrewlinePackageRoot(startDir = moduleDir) {
   let current = startDir;
@@ -206,10 +207,41 @@ function buildPermissionArgs(approvalMode = 'default') {
   }
 }
 
+function normalizeQueueTtlSeconds(value = DEFAULT_ACPX_QUEUE_TTL_SECONDS) {
+  if (value === undefined || value === null || value === '') return DEFAULT_ACPX_QUEUE_TTL_SECONDS;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return DEFAULT_ACPX_QUEUE_TTL_SECONDS;
+  return Math.floor(number);
+}
+
+function buildRunTurnArgs({
+  cwd,
+  agentId,
+  runtimeSessionName,
+  messageText,
+  approvalMode = 'default',
+  queueTtlSeconds = DEFAULT_ACPX_QUEUE_TTL_SECONDS
+}) {
+  return [
+    '--cwd', cwd,
+    '--format', 'json',
+    '--ttl', String(normalizeQueueTtlSeconds(queueTtlSeconds)),
+    ...buildPermissionArgs(approvalMode),
+    agentId,
+    '-s', runtimeSessionName,
+    messageText
+  ];
+}
+
 export class AcpxClient {
-  constructor({ commandTimeoutMs = DEFAULT_ACPX_COMMAND_TIMEOUT_MS, turnTimeoutMs = DEFAULT_ACPX_TURN_TIMEOUT_MS } = {}) {
+  constructor({
+    commandTimeoutMs = DEFAULT_ACPX_COMMAND_TIMEOUT_MS,
+    turnTimeoutMs = DEFAULT_ACPX_TURN_TIMEOUT_MS,
+    queueTtlSeconds = DEFAULT_ACPX_QUEUE_TTL_SECONDS
+  } = {}) {
     this.commandTimeoutMs = commandTimeoutMs;
     this.turnTimeoutMs = turnTimeoutMs;
+    this.queueTtlSeconds = normalizeQueueTtlSeconds(queueTtlSeconds);
   }
 
   async ensureSession({ agentId, cwd = process.cwd(), sessionName }) {
@@ -226,15 +258,14 @@ export class AcpxClient {
 
   async runTurn({ agentId, runtimeHandle, cwd = process.cwd(), messageText, onChunk, approvalMode = 'default' }) {
     const result = await runAcpxStreaming(
-      [
-        '--cwd', cwd,
-        '--format', 'json',
-        '--ttl', '0',
-        ...buildPermissionArgs(approvalMode),
+      buildRunTurnArgs({
+        cwd,
         agentId,
-        '-s', runtimeHandle.runtimeSessionName,
-        messageText
-      ],
+        runtimeSessionName: runtimeHandle.runtimeSessionName,
+        messageText,
+        approvalMode,
+        queueTtlSeconds: this.queueTtlSeconds
+      }),
       { cwd, onChunk, timeoutMs: this.turnTimeoutMs }
     );
     const text = extractFinalText(result.lines);
@@ -341,4 +372,12 @@ export class AcpxClient {
   }
 }
 
-export { runAcpx, sanitizeSessionName, extractFinalText, findCrewlinePackageRoot, resolveBundledAcpxCommand };
+export {
+  DEFAULT_ACPX_QUEUE_TTL_SECONDS,
+  buildRunTurnArgs,
+  runAcpx,
+  sanitizeSessionName,
+  extractFinalText,
+  findCrewlinePackageRoot,
+  resolveBundledAcpxCommand
+};

@@ -24,6 +24,7 @@ export function formatHelp({ defaultRuntimeHome } = {}) {
     '  wechat login             Start first-time WeChat QR login',
     '  push <channel>           Send a proactive message to Telegram/Feishu/WeChat',
     '  trigger <channel>        Post a visible trigger message, then inject it into the bound Agent',
+    '  session <list|reset>     List or reset stored Agent runtime sessions',
     '',
     'Config resolution:',
     `  1. CREWLINE_RUNTIME_HOME if set`,

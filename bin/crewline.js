@@ -21,6 +21,7 @@ import { initializeCrewlineProject } from '../src/app/init-command.js';
 import { formatHelp } from '../src/app/help-command.js';
 import { formatPushHelp, runPushCommand } from '../src/app/push-command.js';
 import { formatTriggerHelp, runTriggerCommand } from '../src/app/trigger-command.js';
+import { formatSessionHelp, runSessionCommand } from '../src/app/session-command.js';
 
 const command = process.argv[2] ?? 'start';
 const extraArgs = process.argv.slice(3);
@@ -140,6 +141,28 @@ async function main() {
         console.error(error?.message ?? String(error));
         console.error('');
         console.error(formatTriggerHelp());
+        process.exitCode = 1;
+      }
+      return;
+    }
+    case 'session': {
+      if (!subcommand || subcommand === '--help' || subcommand === '-h') {
+        console.log(formatSessionHelp());
+        return;
+      }
+      try {
+        const result = await runSessionCommand({
+          argv: extraArgs,
+          stdin: process.stdin
+        });
+        console.log(JSON.stringify(result, null, 2));
+        if (result.ok !== true) {
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        console.error(error?.message ?? String(error));
+        console.error('');
+        console.error(formatSessionHelp());
         process.exitCode = 1;
       }
       return;
