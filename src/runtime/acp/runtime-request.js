@@ -5,6 +5,7 @@ export function createRuntimeRequest(input) {
     runtimeHandle: input.runtimeHandle,
     cwd: input.cwd,
     approvalMode: input.approvalMode ?? 'default',
+    model: input.model,
     messageText: input.messageText,
     metadata: input.metadata ?? {},
     onChunk: input.onChunk

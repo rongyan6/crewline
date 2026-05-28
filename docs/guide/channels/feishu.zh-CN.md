@@ -208,6 +208,7 @@ Crewline 的主配置文件默认在：
   "instances": {
     "codex_cc": {
       "providerId": "codex",
+      "model": "gpt-5.5[medium]",
       "cwd": "/Users/you/code/project-a"
     },
     "claude_cc": {

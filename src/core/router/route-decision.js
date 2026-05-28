@@ -6,6 +6,7 @@ export function createRouteDecision(input) {
     providerId: input.providerId,
     agentName: input.agentName,
     resolvedCwd: input.resolvedCwd,
-    approvalMode: input.approvalMode ?? 'default'
+    approvalMode: input.approvalMode ?? 'default',
+    model: input.model
   });
 }

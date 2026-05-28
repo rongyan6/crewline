@@ -158,6 +158,35 @@ test('resolveConfig merges system defaults into channel.telegram and normalizes 
   assert.equal(resolved.agents.instances.codex_cc.providerId, 'codex');
 });
 
+test('resolveConfig normalizes provider and instance ACP model overrides', () => {
+  const resolved = resolveConfig(
+    {
+      channel: {
+        telegram: {
+          groupAllowFrom: ['1'],
+          bindings: { dm: { '1': { instanceId: 'codex_cc' } }, group: {}, topic: {} }
+        }
+      },
+      agents: {
+        providers: {
+          codex: { driver: 'acpx', agent: 'codex', model: 'gpt-5.4[medium]' }
+        },
+        instances: {
+          codex_cc: { providerId: 'codex', cwd: '/tmp' },
+          codex_frontier: { providerId: 'codex', cwd: '/tmp', model: ' gpt-5.5[medium] ' }
+        }
+      }
+    },
+    null,
+    { TELEGRAM_BOT_TOKEN: 'x' },
+    { configDir: '/tmp' }
+  );
+
+  assert.equal(resolved.agents.providers.codex.model, 'gpt-5.4[medium]');
+  assert.equal(resolved.agents.instances.codex_cc.model, 'gpt-5.4[medium]');
+  assert.equal(resolved.agents.instances.codex_frontier.model, 'gpt-5.5[medium]');
+});
+
 test('resolveConfig lets channel.telegram override legacy telegram config', () => {
   const resolved = resolveConfig(
     {

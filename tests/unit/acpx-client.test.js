@@ -48,6 +48,19 @@ test('buildRunTurnArgs accepts an explicit acpx queue ttl override', () => {
   assert.equal(args[5], '60');
 });
 
+test('buildRunTurnArgs passes an explicit ACP model before the agent command', () => {
+  const args = buildRunTurnArgs({
+    cwd: '/tmp/project',
+    agentId: 'codex',
+    runtimeSessionName: 'telegram:dm:1',
+    messageText: 'hi',
+    model: 'gpt-5.5[medium]'
+  });
+
+  assert.deepEqual(args.slice(6, 8), ['--model', 'gpt-5.5[medium]']);
+  assert.equal(args.at(-4), 'codex');
+});
+
 test('buildRunTurnArgs treats null acpx queue ttl as the default', () => {
   const args = buildRunTurnArgs({
     cwd: '/tmp/project',

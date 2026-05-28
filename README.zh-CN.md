@@ -79,6 +79,7 @@ crewline help
     "instances": {
       "codex_cc": {
         "providerId": "codex",
+        "model": "gpt-5.5[medium]",
         "cwd": "/absolute/path/to/your/project"
       }
     }
@@ -253,6 +254,7 @@ crewline session reset wechat --account bot@im.bot --user-id wxid_xxx
 - `session list` 复用 `push --list` 的目标发现逻辑
 - `session reset` 会尽量关闭当前已知的 Agent runtime session，删除本地 runtime binding，然后让下一条入站消息在正在运行的服务进程里重新创建新会话
 - 修改本地第三方 API 环境变量、provider model、ACPX/Codex/Claude 凭据后，可以用它清掉旧会话
+- Codex 走 ACP 时建议在 `agents.instances.<id>.model` 固定 ACP 广告出的模型 ID，例如 `gpt-5.5[medium]`；这样 Codex App 自动改写 `~/.codex/config.toml` 也不会影响 Crewline 通道
 - 飞书私聊 reset 如果这个 `chat-id` 在运行期历史里已经出现过，可以自动回填参与者；否则请显式传 `--participant-id`
 
 ## 7. 会话内置命令

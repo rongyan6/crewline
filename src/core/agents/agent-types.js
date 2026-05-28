@@ -5,6 +5,7 @@ export function createAgentDescriptor(id, config) {
     agent: config.agent,
     cwd: config.cwd,
     sessionNamePrefix: config.sessionNamePrefix,
-    approvalMode: config.approvalMode
+    approvalMode: config.approvalMode,
+    model: config.model
   });
 }

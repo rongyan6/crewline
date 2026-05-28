@@ -378,7 +378,11 @@ export async function handleAdminCommand({ inboundMessage, config, live = {}, de
         ? '当前没有配置 agent 实例。'
         : [
             'Agent 实例：',
-            ...instances.map((instance) => `${instance.id} providerId=${instance.providerId} cwd=${instance.cwd}`)
+            ...instances.map((instance) => [
+              `${instance.id} providerId=${instance.providerId}`,
+              instance.model ? `model=${instance.model}` : null,
+              `cwd=${instance.cwd}`
+            ].filter(Boolean).join(' '))
           ].join('\n')
     };
   }

@@ -16,7 +16,8 @@ export function listAgentInstances(userConfig = {}) {
   return Object.entries(userConfig?.agents?.instances ?? {}).map(([id, instance]) => ({
     id,
     providerId: instance?.providerId ?? null,
-    cwd: instance?.cwd ?? null
+    cwd: instance?.cwd ?? null,
+    model: instance?.model ?? userConfig?.agents?.providers?.[instance?.providerId]?.model ?? null
   }));
 }
 

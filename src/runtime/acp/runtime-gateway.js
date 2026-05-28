@@ -6,8 +6,8 @@ export class AcpRuntimeGateway {
     this.client = client;
   }
 
-  async ensureSession({ agentId, cwd, sessionName }) {
-    return this.client.ensureSession({ agentId, cwd, sessionName });
+  async ensureSession({ agentId, cwd, sessionName, model }) {
+    return this.client.ensureSession({ agentId, cwd, sessionName, model });
   }
 
   async resumeSession({ agentId, cwd, runtimeHandle }) {

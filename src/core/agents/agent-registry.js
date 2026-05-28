@@ -33,7 +33,8 @@ export class AgentRegistry {
       agent: provider.agent,
       cwd: instance.cwd,
       sessionNamePrefix: instance.sessionNamePrefix ?? `crewline-${instanceId}`,
-      approvalMode: instance.approvalMode ?? 'default'
+      approvalMode: instance.approvalMode ?? 'default',
+      model: instance.model ?? provider.model
     };
   }
 }

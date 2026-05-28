@@ -7,7 +7,7 @@ import { createInboundMessage } from '../../src/channel/host/inbound-message.js'
 test('router returns route decision for bound telegram user', () => {
   const registry = new AgentRegistry({
     providers: { codex: { driver: 'acpx', agent: 'codex' } },
-    instances: { codex_cc: { providerId: 'codex', cwd: '/tmp' } }
+    instances: { codex_cc: { providerId: 'codex', cwd: '/tmp', model: 'gpt-5.5[medium]' } }
   });
   const router = new ConversationRouter({
     bindings: { telegram: { dm: { '123': { instanceId: 'codex_cc' } }, group: {}, topic: {} } },
@@ -26,6 +26,7 @@ test('router returns route decision for bound telegram user', () => {
   assert.equal(decision.instanceId, 'codex_cc');
   assert.equal(decision.agentName, 'codex');
   assert.equal(decision.conversationKey, 'telegram:dm:456');
+  assert.equal(decision.model, 'gpt-5.5[medium]');
 });
 
 test('router returns route decision for bound telegram user in account-scoped bindings', () => {

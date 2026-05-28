@@ -8,6 +8,7 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ACPX_COMMAND_TIMEOUT_MS = 120_000;
 const DEFAULT_ACPX_TURN_TIMEOUT_MS = 600_000;
 const DEFAULT_ACPX_QUEUE_TTL_SECONDS = 300;
+const FALLBACK_ACPX_PACKAGE = 'acpx@0.10.0';
 
 function findCrewlinePackageRoot(startDir = moduleDir) {
   let current = startDir;
@@ -50,7 +51,7 @@ function commandCandidates() {
   return [
     ...(bundled ? [{ command: bundled, prefix: [] }] : []),
     { command: 'acpx', prefix: [] },
-    { command: 'npx', prefix: ['-y', 'acpx@0.5.2'] }
+    { command: 'npx', prefix: ['-y', FALLBACK_ACPX_PACKAGE] }
   ];
 }
 
@@ -207,6 +208,12 @@ function buildPermissionArgs(approvalMode = 'default') {
   }
 }
 
+function buildModelArgs(model) {
+  if (typeof model !== 'string') return [];
+  const trimmed = model.trim();
+  return trimmed ? ['--model', trimmed] : [];
+}
+
 function normalizeQueueTtlSeconds(value = DEFAULT_ACPX_QUEUE_TTL_SECONDS) {
   if (value === undefined || value === null || value === '') return DEFAULT_ACPX_QUEUE_TTL_SECONDS;
   const number = Number(value);
@@ -220,12 +227,14 @@ function buildRunTurnArgs({
   runtimeSessionName,
   messageText,
   approvalMode = 'default',
+  model,
   queueTtlSeconds = DEFAULT_ACPX_QUEUE_TTL_SECONDS
 }) {
   return [
     '--cwd', cwd,
     '--format', 'json',
     '--ttl', String(normalizeQueueTtlSeconds(queueTtlSeconds)),
+    ...buildModelArgs(model),
     ...buildPermissionArgs(approvalMode),
     agentId,
     '-s', runtimeSessionName,
@@ -256,7 +265,7 @@ export class AcpxClient {
     });
   }
 
-  async runTurn({ agentId, runtimeHandle, cwd = process.cwd(), messageText, onChunk, approvalMode = 'default' }) {
+  async runTurn({ agentId, runtimeHandle, cwd = process.cwd(), messageText, onChunk, approvalMode = 'default', model }) {
     const result = await runAcpxStreaming(
       buildRunTurnArgs({
         cwd,
@@ -264,6 +273,7 @@ export class AcpxClient {
         runtimeSessionName: runtimeHandle.runtimeSessionName,
         messageText,
         approvalMode,
+        model,
         queueTtlSeconds: this.queueTtlSeconds
       }),
       { cwd, onChunk, timeoutMs: this.turnTimeoutMs }

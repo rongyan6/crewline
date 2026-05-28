@@ -79,6 +79,7 @@ Edit `~/.crewline/crewline.json` and make sure the agent instance points to the 
     "instances": {
       "codex_cc": {
         "providerId": "codex",
+        "model": "gpt-5.5[medium]",
         "cwd": "/absolute/path/to/your/project"
       }
     }
@@ -248,6 +249,7 @@ Notes:
 - `session list` uses the same known target discovery as `push --list`
 - `session reset` closes the known Agent runtime session when possible, removes the stored binding, and lets the next inbound message create a fresh runtime session inside the running service
 - this is useful after changing local API environment variables, provider models, or ACPX/Codex/Claude credentials
+- for Codex over ACP, pin `agents.instances.<id>.model` to an advertised ACP model id such as `gpt-5.5[medium]`; this keeps Crewline stable even when Codex App rewrites `~/.codex/config.toml`
 - Feishu direct-message resets can auto-resolve the participant from runtime history when the `chat-id` was seen before; otherwise pass `--participant-id`
 
 ## 7. Built-in Conversation Commands

@@ -191,7 +191,8 @@ export class SessionManager {
     const runtimeHandle = await this.runtimeGateway.ensureSession({
       agentId: routeDecision.agentName,
       cwd: routeDecision.resolvedCwd,
-      sessionName: routeDecision.conversationKey
+      sessionName: routeDecision.conversationKey,
+      model: routeDecision.model
     });
     const active = this.normalizeSession({
       sessionId,
@@ -216,7 +217,8 @@ export class SessionManager {
     const runtimeHandle = await this.runtimeGateway.ensureSession({
       agentId: routeDecision.agentName,
       cwd: routeDecision.resolvedCwd,
-      sessionName: routeDecision.conversationKey
+      sessionName: routeDecision.conversationKey,
+      model: routeDecision.model
     });
     const recreated = this.normalizeSession({
       sessionId,
@@ -250,7 +252,8 @@ export class SessionManager {
     const runtimeHandle = await this.runtimeGateway.ensureSession({
       agentId: routeDecision.agentName,
       cwd: routeDecision.resolvedCwd,
-      sessionName: routeDecision.conversationKey
+      sessionName: routeDecision.conversationKey,
+      model: routeDecision.model
     });
     const active = this.normalizeSession({
       sessionId,
@@ -274,6 +277,7 @@ export class SessionManager {
       runtimeHandle: session.runtimeHandle,
       cwd: routeDecision.resolvedCwd,
       approvalMode: routeDecision.approvalMode,
+      model: routeDecision.model,
       messageText: inboundMessage.rawMeta?.runtimeMessageText ?? inboundMessage.text,
       metadata: { conversationKey: routeDecision.conversationKey },
       onChunk: options.onChunk

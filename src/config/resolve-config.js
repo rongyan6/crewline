@@ -39,6 +39,12 @@ function stripTelegramAccountSecrets(accountConfig = {}) {
   return next;
 }
 
+function normalizeOptionalString(value) {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function defaultSystemConfig() {
   return {
     runtime: {
@@ -100,16 +106,19 @@ function normalizeAgents(agents = {}) {
   for (const [id, config] of Object.entries(agents.providers ?? {})) {
     providers[id] = {
       driver: config.driver ?? 'acpx',
-      agent: config.agent ?? id
+      agent: config.agent ?? id,
+      model: normalizeOptionalString(config.model)
     };
   }
   const instances = {};
   for (const [id, config] of Object.entries(agents.instances ?? {})) {
+    const providerModel = providers[config.providerId]?.model;
     instances[id] = {
       providerId: config.providerId,
       cwd: config.cwd,
       sessionNamePrefix: config.sessionNamePrefix ?? `crewline-${id}`,
-      approvalMode: config.approvalMode ?? 'default'
+      approvalMode: config.approvalMode ?? 'default',
+      model: normalizeOptionalString(config.model) ?? providerModel
     };
   }
   return {

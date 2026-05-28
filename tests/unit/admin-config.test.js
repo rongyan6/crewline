@@ -29,6 +29,24 @@ test('applyAgentAdd creates a new agent instance', () => {
   });
 });
 
+test('listAgentInstances resolves provider-level model defaults', async () => {
+  const { listAgentInstances } = await import('../../src/admin/admin-config.js');
+  const instances = listAgentInstances({
+    agents: {
+      providers: {
+        codex: { driver: 'acpx', agent: 'codex', model: 'gpt-5.4[medium]' }
+      },
+      instances: {
+        codex_cc: { providerId: 'codex', cwd: '/tmp/codex' },
+        codex_frontier: { providerId: 'codex', cwd: '/tmp/frontier', model: 'gpt-5.5[medium]' }
+      }
+    }
+  });
+
+  assert.equal(instances[0].model, 'gpt-5.4[medium]');
+  assert.equal(instances[1].model, 'gpt-5.5[medium]');
+});
+
 test('applyAgentCwd preserves instance metadata and updates cwd', () => {
   const updated = applyAgentCwd({
     agents: {

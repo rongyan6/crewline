@@ -64,11 +64,11 @@ Relevant config shape:
 {
   "agents": {
     "providers": {
-      "codex": { "driver": "acpx", "agent": "codex" },
+      "codex": { "driver": "acpx", "agent": "codex", "model": "gpt-5.5[medium]" },
       "claude": { "driver": "acpx", "agent": "claude" }
     },
     "instances": {
-      "codex_cc": { "providerId": "codex", "cwd": "/absolute/path" },
+      "codex_cc": { "providerId": "codex", "model": "gpt-5.5[medium]", "cwd": "/absolute/path" },
       "claude_cc": { "providerId": "claude", "cwd": "/absolute/path" }
     }
   }
@@ -79,6 +79,9 @@ Operational rules:
 
 - `providerId` must exist under `agents.providers`
 - `cwd` should be an existing absolute path
+- `model` is optional on either provider or instance; instance-level values win
+- For Codex over ACP, use the advertised ACP model ID, including reasoning level, for example `gpt-5.5[medium]`
+- Pinning `model` keeps Crewline independent from Codex App rewrites to `~/.codex/config.toml`
 - Remote admin commands currently only allow `providerId=codex|claude`
 
 ## Channel Highlights

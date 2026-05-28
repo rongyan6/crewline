@@ -77,7 +77,8 @@ export class ConversationRouter {
       providerId: instance.providerId,
       agentName: instance.agent,
       resolvedCwd: instance.cwd,
-      approvalMode: instance.approvalMode
+      approvalMode: instance.approvalMode,
+      model: instance.model
     });
   }
 }

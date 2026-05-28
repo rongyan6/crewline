@@ -208,6 +208,7 @@ For example, if your config contains:
   "instances": {
     "codex_cc": {
       "providerId": "codex",
+      "model": "gpt-5.5[medium]",
       "cwd": "/Users/you/code/project-a"
     },
     "claude_cc": {

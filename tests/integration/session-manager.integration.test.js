@@ -14,12 +14,16 @@ class FakeRuntimeGateway {
     this.failFirstTurn = false;
     this.turns = 0;
     this.closed = 0;
+    this.ensureRequests = [];
+    this.turnRequests = [];
   }
-  async ensureSession({ agentId }) {
+  async ensureSession({ agentId, ...request }) {
+    this.ensureRequests.push({ agentId, ...request });
     return { backend: 'acpx', runtimeSessionName: `${agentId}-1`, sessionKey: `${agentId}:1` };
   }
   async runTurn(request) {
     this.turns += 1;
+    this.turnRequests.push(request);
     if (this.failFirstTurn && this.turns === 1) {
       return { ok: false, sessionId: request.sessionId, errorCode: 'RUNTIME_SESSION_LOST', terminal: false };
     }
@@ -65,6 +69,30 @@ test('session manager creates and reuses session', async () => {
 
   assert.equal(first.session.sessionId, second.session.sessionId);
   assert.equal(second.result.outputText, 'echo:again');
+});
+
+test('session manager passes route model override to the runtime', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-session-model-'));
+  const runtimeGateway = new FakeRuntimeGateway();
+  const manager = new SessionManager({
+    stateStore: createStateStore(dir),
+    runtimeGateway
+  });
+
+  const routeDecision = {
+    conversationKey: 'telegram:dm:model',
+    conversationRef: { channel: 'telegram', conversationId: 'model', participantId: '123', scope: 'dm' },
+    instanceId: 'codex_cc',
+    providerId: 'codex',
+    agentName: 'codex',
+    resolvedCwd: '/tmp',
+    model: 'gpt-5.5[medium]'
+  };
+
+  await manager.runTurn({ inboundMessage: { text: 'hello' }, routeDecision });
+
+  assert.equal(runtimeGateway.ensureRequests[0].model, 'gpt-5.5[medium]');
+  assert.equal(runtimeGateway.turnRequests[0].model, 'gpt-5.5[medium]');
 });
 
 test('session manager rotates session after maxTurnsPerSession', async () => {
