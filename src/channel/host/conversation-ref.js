@@ -1,10 +1,14 @@
 export function buildConversationKey(conversationRef) {
-  return [
+  const keyParts = [
     conversationRef.channel,
     conversationRef.accountId && conversationRef.accountId !== 'default' ? conversationRef.accountId : null,
     conversationRef.scope,
     conversationRef.conversationId
-  ].filter(Boolean).join(':');
+  ];
+  if (conversationRef.scope === 'topic') {
+    keyParts.push(conversationRef.topicId ?? conversationRef.participantId ?? 'unknown');
+  }
+  return keyParts.filter(Boolean).join(':');
 }
 
 export function runtimeBindingPath({ dataDir, conversationRef }) {

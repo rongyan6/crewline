@@ -7,6 +7,17 @@ test('conversation key uses channel scope and conversation id', () => {
   assert.equal(key, 'telegram:dm:123');
 });
 
+test('conversation key isolates telegram topics by topic id', () => {
+  assert.equal(
+    buildConversationKey({ channel: 'telegram', scope: 'topic', conversationId: '-1001', topicId: '42', participantId: 'u1' }),
+    'telegram:topic:-1001:42'
+  );
+  assert.equal(
+    buildConversationKey({ channel: 'telegram', scope: 'topic', conversationId: '-1001', participantId: '99' }),
+    'telegram:topic:-1001:99'
+  );
+});
+
 test('conversation key and paths include non-default account ids', () => {
   assert.equal(
     buildConversationKey({ channel: 'telegram', accountId: '8641929320', scope: 'dm', conversationId: '123', participantId: 'u1' }),

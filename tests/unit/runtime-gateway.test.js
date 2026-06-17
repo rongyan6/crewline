@@ -24,7 +24,7 @@ test('runtime gateway treats command timeout as turn failure instead of session 
   const gateway = new AcpRuntimeGateway({
     client: {
       async runTurn() {
-        const error = new Error('acpx command timed out after 600000ms: npx -y acpx@0.5.2 codex');
+        const error = new Error('acpx command timed out after 600000ms: npx -y acpx@0.10.0 codex');
         error.code = 'ETIMEDOUT';
         throw error;
       }

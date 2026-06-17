@@ -154,6 +154,45 @@ test('session manager resets the current runtime session without changing the ro
   assert.equal(active.state, 'active');
 });
 
+test('session manager keeps reset turn count independent from old conversation log', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-session-reset-count-'));
+  const runtimeGateway = new FakeRuntimeGateway();
+  const manager = new SessionManager({
+    stateStore: createStateStore(dir),
+    runtimeGateway,
+    sessionPolicy: { maxTurnsPerSession: 2, idleTtlMinutes: 240 }
+  });
+
+  const routeDecision = {
+    conversationKey: 'telegram:dm:reset-count',
+    conversationRef: { channel: 'telegram', conversationId: 'reset-count', participantId: '123', scope: 'dm' },
+    instanceId: 'codex_cc',
+    providerId: 'codex',
+    agentName: 'codex',
+    resolvedCwd: '/tmp'
+  };
+
+  await manager.stateStore.conversationLog.append({
+    path: path.join(dir, 'conversations', 'telegram', 'dm', 'reset-count.jsonl'),
+    role: 'user',
+    text: 'old one'
+  });
+  await manager.stateStore.conversationLog.append({
+    path: path.join(dir, 'conversations', 'telegram', 'dm', 'reset-count.jsonl'),
+    role: 'user',
+    text: 'old two'
+  });
+
+  const first = await manager.runTurn({ inboundMessage: { text: 'before reset' }, routeDecision });
+  const reset = await manager.resetSession(routeDecision);
+  const afterReset = await manager.runTurn({ inboundMessage: { text: 'after reset' }, routeDecision });
+
+  assert.notEqual(reset.sessionId, first.session.sessionId);
+  assert.equal(afterReset.session.sessionId, reset.sessionId);
+  assert.equal(afterReset.session.turnCount, 1);
+  assert.equal(runtimeGateway.closed, 1);
+});
+
 test('session manager rotates idle session after ttl expiry', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-session-idle-'));
   const stateStore = createStateStore(dir);
@@ -312,4 +351,36 @@ test('session manager persists runtime binding metadata on active session files'
   assert.equal(typeof active.lastUsedAt, 'string');
   assert.equal(active.lastError, null);
   assert.match(active.conversationLogPath, /conversations\/telegram\/dm\/binding\.jsonl$/);
+});
+
+test('session manager persists failed state when runtime session creation fails', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crewline-session-create-fail-'));
+  const runtimeGateway = new FakeRuntimeGateway();
+  runtimeGateway.ensureSession = async () => {
+    throw new Error('acpx unavailable');
+  };
+  const manager = new SessionManager({
+    stateStore: createStateStore(dir),
+    runtimeGateway
+  });
+
+  const routeDecision = {
+    conversationKey: 'telegram:dm:create-fail',
+    conversationRef: { channel: 'telegram', conversationId: 'create-fail', participantId: '123', scope: 'dm' },
+    instanceId: 'codex_cc',
+    providerId: 'codex',
+    agentName: 'codex',
+    resolvedCwd: '/tmp'
+  };
+
+  await assert.rejects(
+    () => manager.getOrCreateSession(routeDecision),
+    /acpx unavailable/
+  );
+
+  const failed = await manager.stateStore.runtimeBindingStore.get(routeDecision.conversationRef);
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.bindingState, 'failed');
+  assert.equal(failed.lastError.message, 'acpx unavailable');
+  assert.equal(failed.lastError.code, 'RUNTIME_TURN_FAILED');
 });

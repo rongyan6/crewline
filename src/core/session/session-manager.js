@@ -58,7 +58,7 @@ export class SessionManager {
   async hydrateStoredSession(existing, routeDecision) {
     if (!existing) return null;
     const normalized = this.normalizeSession(existing, routeDecision);
-    if (Number.isFinite(normalized.turnCount) && normalized.turnCount > 0) {
+    if (Number.isFinite(existing.turnCount)) {
       return normalized;
     }
     const countedTurns = normalized.conversationLogPath
@@ -98,6 +98,22 @@ export class SessionManager {
       message: error?.message ?? String(error),
       layer: 'runtime'
     };
+  }
+
+  async persistSessionState(routeDecision, session) {
+    const active = this.normalizeSession(session, routeDecision);
+    await this.stateStore.runtimeBindingStore.set(routeDecision.conversationRef, active);
+    return active;
+  }
+
+  async persistFailedSession(routeDecision, session, error) {
+    return this.persistSessionState(routeDecision, {
+      ...session,
+      bindingState: SessionStates.FAILED,
+      updatedAt: nowIso(),
+      lastUsedAt: session.lastUsedAt ?? session.updatedAt ?? nowIso(),
+      lastError: this.buildRuntimeError(error)
+    });
   }
 
   async tryResumeSession(routeDecision, session) {
@@ -188,22 +204,35 @@ export class SessionManager {
     const currentState = hydrated?.state ?? SessionStates.MISSING;
     transitionSession(currentState, SessionStates.CREATING);
     const sessionId = hydrated?.sessionId ?? randomId('session');
-    const runtimeHandle = await this.runtimeGateway.ensureSession({
-      agentId: routeDecision.agentName,
-      cwd: routeDecision.resolvedCwd,
-      sessionName: routeDecision.conversationKey,
-      model: routeDecision.model
-    });
-    const active = this.normalizeSession({
+    const creating = await this.persistSessionState(routeDecision, {
       sessionId,
-      bindingState: SessionStates.ACTIVE,
-      runtimeHandle,
+      bindingState: SessionStates.CREATING,
+      runtimeHandle: hydrated?.runtimeHandle ?? null,
       createdAt: hydrated?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
       lastUsedAt: nowIso(),
       lastError: null
-    }, routeDecision);
-    await this.stateStore.runtimeBindingStore.set(routeDecision.conversationRef, active);
+    });
+    let runtimeHandle;
+    try {
+      runtimeHandle = await this.runtimeGateway.ensureSession({
+        agentId: routeDecision.agentName,
+        cwd: routeDecision.resolvedCwd,
+        sessionName: routeDecision.conversationKey,
+        model: routeDecision.model
+      });
+    } catch (error) {
+      await this.persistFailedSession(routeDecision, creating, error);
+      throw error;
+    }
+    const active = await this.persistSessionState(routeDecision, {
+      ...creating,
+      bindingState: SessionStates.ACTIVE,
+      runtimeHandle,
+      updatedAt: nowIso(),
+      lastUsedAt: nowIso(),
+      lastError: null
+    });
     return active;
   }
 
@@ -214,24 +243,37 @@ export class SessionManager {
     }
     transitionSession(SessionStates.RECOVERING, SessionStates.RECREATING);
     const sessionId = randomId('session');
-    const runtimeHandle = await this.runtimeGateway.ensureSession({
-      agentId: routeDecision.agentName,
-      cwd: routeDecision.resolvedCwd,
-      sessionName: routeDecision.conversationKey,
-      model: routeDecision.model
-    });
-    const recreated = this.normalizeSession({
+    const recreating = await this.persistSessionState(routeDecision, {
       sessionId,
-      bindingState: SessionStates.ACTIVE,
-      runtimeHandle,
+      bindingState: SessionStates.RECREATING,
+      runtimeHandle: previousSession.runtimeHandle ?? null,
       turnCount: 0,
       createdAt: previousSession.createdAt ?? nowIso(),
       updatedAt: nowIso(),
       lastUsedAt: nowIso(),
       lastRecoveryAt: nowIso(),
       lastError: null
-    }, routeDecision);
-    await this.stateStore.runtimeBindingStore.set(routeDecision.conversationRef, recreated);
+    });
+    let runtimeHandle;
+    try {
+      runtimeHandle = await this.runtimeGateway.ensureSession({
+        agentId: routeDecision.agentName,
+        cwd: routeDecision.resolvedCwd,
+        sessionName: routeDecision.conversationKey,
+        model: routeDecision.model
+      });
+    } catch (error) {
+      await this.persistFailedSession(routeDecision, recreating, error);
+      throw error;
+    }
+    const recreated = await this.persistSessionState(routeDecision, {
+      ...recreating,
+      bindingState: SessionStates.ACTIVE,
+      runtimeHandle,
+      updatedAt: nowIso(),
+      lastUsedAt: nowIso(),
+      lastError: null
+    });
     return recreated;
   }
 
@@ -249,24 +291,37 @@ export class SessionManager {
 
     const currentTime = nowIso();
     const sessionId = randomId('session');
-    const runtimeHandle = await this.runtimeGateway.ensureSession({
-      agentId: routeDecision.agentName,
-      cwd: routeDecision.resolvedCwd,
-      sessionName: routeDecision.conversationKey,
-      model: routeDecision.model
-    });
-    const active = this.normalizeSession({
+    const creating = await this.persistSessionState(routeDecision, {
       sessionId,
-      bindingState: SessionStates.ACTIVE,
-      runtimeHandle,
+      bindingState: SessionStates.CREATING,
+      runtimeHandle: null,
       turnCount: 0,
       createdAt: currentTime,
       updatedAt: currentTime,
       lastUsedAt: currentTime,
       lastRecoveryAt: null,
       lastError: null
-    }, routeDecision);
-    await this.stateStore.runtimeBindingStore.set(routeDecision.conversationRef, active);
+    });
+    let runtimeHandle;
+    try {
+      runtimeHandle = await this.runtimeGateway.ensureSession({
+        agentId: routeDecision.agentName,
+        cwd: routeDecision.resolvedCwd,
+        sessionName: routeDecision.conversationKey,
+        model: routeDecision.model
+      });
+    } catch (error) {
+      await this.persistFailedSession(routeDecision, creating, error);
+      throw error;
+    }
+    const active = await this.persistSessionState(routeDecision, {
+      ...creating,
+      bindingState: SessionStates.ACTIVE,
+      runtimeHandle,
+      updatedAt: nowIso(),
+      lastUsedAt: nowIso(),
+      lastError: null
+    });
     return active;
   }
 
